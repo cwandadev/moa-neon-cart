@@ -156,7 +156,7 @@
     color: var(--color-foreground);
     font-family: var(--font-body);
     background-image: var(--gradient-hero);
-    background-attachment: fixed;
+    background-attachment: scroll;
   }
 
   h1,
@@ -172,7 +172,6 @@
 
 @utility glass {
   background-color: var(--glass);
-  backdrop-filter: blur(18px) saturate(140%);
   border: 1px solid var(--color-border);
 }
 

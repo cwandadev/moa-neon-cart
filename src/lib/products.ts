@@ -52,7 +52,7 @@ export type Product = {
  * (e.g. https://res.cloudinary.com/<cloud>/image/upload/w_900,q_auto/<public_id>)
  * once the backend is connected.
  */
-export const cdn = (photo: string, w = 900, crop = "entropy") =>
+export const cdn = (photo: string, w = 400, crop = "entropy") =>
   `https://images.unsplash.com/${photo}?auto=format&fit=crop&crop=${crop}&w=${w}&q=80`;
 
 type Seed = [name: string, category: Category, price: number, photos: string[]];

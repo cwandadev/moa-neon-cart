@@ -27,7 +27,7 @@ export function ProductCard({ product }: { product: Product }) {
   const wished = isWished(product.id);
 
   return (
-    <article className="group relative flex flex-col overflow-hidden rounded-2xl border border-border bg-card/60 transition-all duration-300 hover:-translate-y-1 hover:border-primary/40 hover:shadow-[0_20px_50px_-24px_var(--primary)]">
+    <article className="group relative flex flex-col overflow-hidden rounded-2xl border border-border bg-card hover:-translate-y-1 hover:border-primary/40 hover:shadow-[0_20px_50px_-24px_var(--primary)]">
       <Link
         to="/product/$productId"
         params={{ productId: product.id }}
@@ -37,10 +37,9 @@ export function ProductCard({ product }: { product: Product }) {
           src={product.images[0]}
           alt={product.name}
           loading="lazy"
-          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+          className="h-full w-full object-cover "
         />
-        <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-background/90 to-transparent" />
-        <span className="absolute left-3 top-3 rounded-full bg-background/70 px-2.5 py-1 font-body text-[11px] text-muted-foreground backdrop-blur">
+        <span className="absolute left-3 top-3 rounded-full bg-background/90 px-2.5 py-1 font-body text-[11px] text-muted-foreground">
           {product.category}
         </span>
         {product.createdDaysAgo < 25 && (
@@ -55,7 +54,7 @@ export function ProductCard({ product }: { product: Product }) {
         aria-label="Toggle wishlist"
         onClick={() => toggleWishlist(product.id)}
         className={cn(
-          "absolute right-3 top-12 grid h-9 w-9 place-items-center rounded-full border border-border bg-background/70 backdrop-blur transition-colors",
+          "absolute right-3 top-12 grid h-9 w-9 place-items-center rounded-full border border-border bg-background/90 transition-colors",
           wished ? "text-accent" : "text-muted-foreground hover:text-foreground",
         )}
       >

@@ -14,6 +14,7 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { StoreProvider } from "../lib/store";
 import { CartDrawer } from "../components/shop/CartDrawer";
 import { SupportChat } from "../components/shop/SupportChat";
+import { BottomNav } from "../components/shop/BottomNav";
 
 function NotFoundComponent() {
   return (
@@ -137,6 +138,7 @@ function RootComponent() {
         <Outlet />
         <CartDrawer />
         <SupportChat />
+        <BottomNav />
       </StoreProvider>
     </QueryClientProvider>
   );

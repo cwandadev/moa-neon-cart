@@ -17,6 +17,8 @@ type StoreValue = {
   cartTotal: number;
   cartOpen: boolean;
   setCartOpen: (v: boolean) => void;
+  chatOpen: boolean;
+  setChatOpen: (v: boolean) => void;
   messages: ChatMessage[];
   sendMessage: (text: string, from?: "client" | "staff") => void;
 };
@@ -32,6 +34,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   ]);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([
     { id: "m1", from: "staff", text: "Hi 👋 Welcome to MOA Mart. How can we help you today?", at: "09:12" },
   ]);
@@ -68,6 +71,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       cartTotal: cart.reduce((s, i) => s + i.qty * i.product.price, 0),
       cartOpen,
       setCartOpen,
+      chatOpen,
+      setChatOpen,
       messages,
       sendMessage: (text, from = "client") =>
         setMessages((prev) => [
@@ -85,7 +90,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             : []),
         ]),
     };
-  }, [wishlist, toggleWishlist, cart, addToCart, cartOpen, messages]);
+  }, [wishlist, toggleWishlist, cart, addToCart, cartOpen, chatOpen, messages]);
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }

@@ -28,6 +28,7 @@ function Catalog() {
   const [query, setQuery] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filters, setFilters] = useState<Filters>(defaultFilters);
+  const [visible, setVisible] = useState(12);
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -89,10 +90,22 @@ function Catalog() {
         </div>
 
         <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-          {results.map((p) => (
+          {results.slice(0, visible).map((p) => (
             <ProductCard key={p.id} product={p} />
           ))}
         </div>
+
+        {results.length > visible && (
+          <div className="mt-8 flex justify-center">
+            <button
+              type="button"
+              onClick={() => setVisible((v) => v + 12)}
+              className="rounded-full border border-border bg-card px-6 py-2.5 font-body text-sm font-medium hover:border-primary/50 hover:text-primary"
+            >
+              Load more
+            </button>
+          </div>
+        )}
 
         {results.length === 0 && (
           <p className="py-24 text-center font-body text-sm text-muted-foreground">
