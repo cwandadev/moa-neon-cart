@@ -15,10 +15,10 @@ export function Header({
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/95">
-      <div className="mx-auto grid w-full max-w-7xl grid-cols-[minmax(0,1fr)_auto] max-sm:grid-cols-1 items-center gap-3 px-4 py-3 sm:px-6 lg:gap-6">
+      <div className="mx-auto grid w-full max-w-7xl grid-cols-[minmax(0,1fr)_auto] max-md:grid-cols-1 items-center gap-3 px-4 py-3 sm:px-6 lg:gap-6">
         <div className="flex min-w-0 items-center gap-3 max-md:justify-center lg:gap-8">
           <Link to="/" className="flex shrink-0 items-center gap-2">
-            <img src="/logo.svg" alt="" className="h-9 w-9 shrink-0" />
+            <img src="/logo.svg" alt="" className="h-9 w-9 shrink-0 max-md:hidden" />
             <span className="font-display text-lg font-semibold tracking-tight sm:text-xl">
               MOA <span className="text-gradient">Mart</span>
             </span>
@@ -35,7 +35,7 @@ export function Header({
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-1.5 max-sm:hidden sm:gap-2">
+        <div className="flex shrink-0 items-center gap-1.5 max-md:hidden sm:gap-2">
           <Button variant="glass" size="icon" className="relative rounded-xl max-md:hidden" aria-label="Wishlist">
             <i className="bx bx-heart text-xl" />
             {wishlist.length > 0 && (
@@ -58,10 +58,8 @@ export function Header({
               </Badge>
             )}
           </Button>
-          <Button asChild variant="ghost" size="sm" className="hidden rounded-xl font-body sm:inline-flex">
-            <Link to="/admin">
-              <i className="bx bx-grid-alt text-lg" /> Admin
-            </Link>
+          <Button variant="glass" size="icon" className="rounded-xl" aria-label="Account">
+            <i className="bx bx-user text-xl" />
           </Button>
         </div>
       </div>
