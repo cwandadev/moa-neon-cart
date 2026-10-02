@@ -5,9 +5,8 @@ import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
 
 export function SupportChat() {
-  const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
-  const { messages, sendMessage } = useStore();
+  const { messages, sendMessage, chatOpen: open, setChatOpen: setOpen } = useStore();
 
   const submit = () => {
     if (!text.trim()) return;
@@ -16,7 +15,7 @@ export function SupportChat() {
   };
 
   return (
-    <div className="fixed bottom-5 right-5 z-50 flex flex-col items-end gap-3">
+    <div className="fixed bottom-5 right-5 z-50 flex flex-col items-end gap-3 max-md:bottom-24">
       {open && (
         <div className="flex h-[26rem] w-[min(22rem,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-2xl border border-border bg-card/95 shadow-[0_30px_80px_-30px_black] backdrop-blur-xl">
           <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
@@ -70,8 +69,8 @@ export function SupportChat() {
 
       <Button
         variant="neon"
-        className="h-14 w-14 rounded-full p-0 shadow-[0_16px_40px_-12px_var(--primary)]"
-        onClick={() => setOpen((v) => !v)}
+        className="h-14 w-14 rounded-full p-0 shadow-[0_16px_40px_-12px_var(--primary)] max-md:hidden"
+        onClick={() => setOpen(!open)}
         aria-label="Support chat"
       >
         <i className={cn("text-2xl", open ? "bx bx-chevron-down" : "bx bx-message-dots")} />

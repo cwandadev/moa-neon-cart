@@ -18,7 +18,7 @@ const buttonVariants = cva(
         link: "text-primary underline-offset-4 hover:underline",
         neon: "bg-primary text-primary-foreground font-semibold shadow-[0_10px_30px_-12px_var(--primary)] hover:brightness-110 hover:shadow-[0_14px_40px_-10px_var(--primary)] transition-all",
         glass:
-          "glass text-foreground hover:border-primary/50 hover:text-primary backdrop-blur transition-colors",
+          "glass text-foreground hover:border-primary/50 hover:text-primary transition-colors",
         whatsapp:
           "bg-accent text-accent-foreground font-semibold hover:brightness-110 shadow-[0_10px_30px_-14px_var(--accent)] transition-all",
       },

@@ -14,13 +14,11 @@ export function Header({
   const { cartCount, wishlist, setCartOpen } = useStore();
 
   return (
-    <header className="sticky top-0 z-40 border-b border-border bg-background/70 backdrop-blur-xl">
-      <div className="mx-auto grid w-full max-w-7xl grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 sm:px-6 lg:gap-6">
-        <div className="flex min-w-0 items-center gap-3 lg:gap-8">
+    <header className="sticky top-0 z-40 border-b border-border bg-background/95">
+      <div className="mx-auto grid w-full max-w-7xl grid-cols-[minmax(0,1fr)_auto] max-md:grid-cols-1 items-center gap-3 px-4 py-3 sm:px-6 lg:gap-6">
+        <div className="flex min-w-0 items-center gap-3 max-md:justify-center lg:gap-8">
           <Link to="/" className="flex shrink-0 items-center gap-2">
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground font-display text-lg font-bold">
-              M
-            </span>
+            <img src="/logo.svg" alt="" className="h-9 w-9 shrink-0 max-md:hidden" />
             <span className="font-display text-lg font-semibold tracking-tight sm:text-xl">
               MOA <span className="text-gradient">Mart</span>
             </span>
@@ -37,8 +35,8 @@ export function Header({
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
-          <Button variant="glass" size="icon" className="relative rounded-xl" aria-label="Wishlist">
+        <div className="flex shrink-0 items-center gap-1.5 max-md:hidden sm:gap-2">
+          <Button variant="glass" size="icon" className="relative rounded-xl max-md:hidden" aria-label="Wishlist">
             <i className="bx bx-heart text-xl" />
             {wishlist.length > 0 && (
               <Badge className="absolute -right-1.5 -top-1.5 h-5 min-w-5 justify-center rounded-full bg-accent px-1 text-[10px] text-accent-foreground">
@@ -49,7 +47,7 @@ export function Header({
           <Button
             variant="glass"
             size="icon"
-            className="relative rounded-xl"
+            className="relative rounded-xl max-md:hidden"
             aria-label="Cart"
             onClick={() => setCartOpen(true)}
           >
@@ -60,10 +58,8 @@ export function Header({
               </Badge>
             )}
           </Button>
-          <Button asChild variant="ghost" size="sm" className="hidden rounded-xl font-body sm:inline-flex">
-            <Link to="/admin">
-              <i className="bx bx-grid-alt text-lg" /> Admin
-            </Link>
+          <Button variant="glass" size="icon" className="rounded-xl" aria-label="Account">
+            <i className="bx bx-user text-xl" />
           </Button>
         </div>
       </div>
