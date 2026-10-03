@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useStore } from "@/lib/store";
+import { UserMenu } from "@/components/shop/UserMenu";
 
 export function Header({
   query,
@@ -58,9 +59,7 @@ export function Header({
               </Badge>
             )}
           </Button>
-          <Button variant="glass" size="icon" className="rounded-xl" aria-label="Account">
-            <i className="bx bx-user text-xl" />
-          </Button>
+          <UserMenu variant="header" />
         </div>
       </div>
 
