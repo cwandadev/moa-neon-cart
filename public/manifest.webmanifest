@@ -1,0 +1,13 @@
+{
+  "name": "MOA Mart",
+  "short_name": "MOA Mart",
+  "description": "Futuristic minimal storefront with instant WhatsApp checkout.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0a0d13",
+  "theme_color": "#0a0d13",
+  "icons": [
+    { "src": "/logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
