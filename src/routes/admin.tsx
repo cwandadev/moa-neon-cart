@@ -1,5 +1,6 @@
-import { createFileRoute, Link, Outlet } from "@tanstack/react-router";
-import { useState } from "react";
+import { createFileRoute, Link, Outlet, useNavigate } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
+import { useAuth } from "@/lib/auth";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({
@@ -31,7 +32,14 @@ const NAV = [
 ] as const;
 
 function AdminLayout() {
+  const { user, ready, isAdmin } = useAuth();
+  const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
+  useEffect(() => {
+    if (ready && !isAdmin) navigate({ to: user ? "/" : "/login" });
+  }, [ready, isAdmin, user, navigate]);
+  if (!ready || !isAdmin) return null;
+
   return (
     <div className="moa-admin min-h-screen lg:flex">
       <aside className="max-lg:hidden hairline sticky top-0 z-30 flex items-center gap-2 overflow-x-auto bg-[#000000]/85 px-4 py-3 backdrop-blur-xl lg:h-screen lg:w-64 lg:flex-col lg:items-stretch lg:overflow-y-auto lg:px-4 lg:py-6">

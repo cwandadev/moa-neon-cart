@@ -3,10 +3,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
+import { useRouterState } from "@tanstack/react-router";
 
 export function SupportChat() {
   const [text, setText] = useState("");
   const { messages, sendMessage, chatOpen: open, setChatOpen: setOpen } = useStore();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  if (pathname === "/login" || pathname === "/register") return null;
 
   const submit = () => {
     if (!text.trim()) return;

@@ -1,4 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
+import { UserMenu } from "@/components/shop/UserMenu";
 import { useStore } from "@/lib/store";
 
 const iconBtn =
@@ -7,7 +8,13 @@ const iconBtn =
 export function BottomNav() {
   const { cartCount, setCartOpen, chatOpen, setChatOpen } = useStore();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  if (pathname === "/admin" || pathname.startsWith("/admin/")) return null;
+  if (
+    pathname === "/login" ||
+    pathname === "/register" ||
+    pathname === "/admin" ||
+    pathname.startsWith("/admin/")
+  )
+    return null;
 
   return (
     <>
@@ -38,9 +45,7 @@ export function BottomNav() {
         <button type="button" aria-label="Chat" onClick={() => setChatOpen(!chatOpen)} className={iconBtn}>
           <i className="bx bx-message-dots text-2xl" />
         </button>
-        <button type="button" aria-label="Profile" className={iconBtn}>
-          <i className="bx bx-user text-2xl" />
-        </button>
+        <UserMenu variant="nav" className={iconBtn} />
       </nav>
     </>
   );
