@@ -1,4 +1,4 @@
-import { Link } from "@tanstack/react-router";
+import { Link, useRouterState } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
 
 const iconBtn =
@@ -6,6 +6,8 @@ const iconBtn =
 
 export function BottomNav() {
   const { cartCount, setCartOpen, chatOpen, setChatOpen } = useStore();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  if (pathname === "/admin" || pathname.startsWith("/admin/")) return null;
 
   return (
     <>
