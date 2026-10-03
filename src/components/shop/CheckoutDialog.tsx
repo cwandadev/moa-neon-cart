@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { money, type Product } from "@/lib/products";
 import { buildWhatsAppMessage, openWhatsApp } from "@/lib/whatsapp";
+import { useStore } from "@/lib/store";
 
 export function CheckoutDialog({
   open,
@@ -20,7 +21,23 @@ export function CheckoutDialog({
   const total = items.reduce((s, i) => s + i.qty * i.product.price, 0);
   const valid = form.name.trim() && form.phone.trim() && form.location.trim();
 
+  const { addOrder } = useStore();
+
   const submit = () => {
+    addOrder({
+      customer: form.name.trim(),
+      phone: form.phone.trim(),
+      location: form.location.trim(),
+      orderType: "Delivery",
+      time: form.time,
+      items: items.map((i) => ({
+        name: i.product.name,
+        price: i.product.price,
+        image: i.product.images[0] ?? "",
+        qty: i.qty,
+      })),
+      total,
+    });
     openWhatsApp(buildWhatsAppMessage(items, form));
     onOpenChange(false);
   };
