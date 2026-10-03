@@ -3,7 +3,8 @@ import { useMemo, useState } from "react";
 import { Header } from "@/components/shop/Header";
 import { FilterBar, defaultFilters, type Filters } from "@/components/shop/FilterBar";
 import { ProductCard } from "@/components/shop/ProductCard";
-import { PRODUCTS, smartFeed } from "@/lib/products";
+import { smartFeed, type Product } from "@/lib/products";
+import { useStore } from "@/lib/store";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -29,10 +30,11 @@ function Catalog() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filters, setFilters] = useState<Filters>(defaultFilters);
   const [visible, setVisible] = useState(12);
+  const { products } = useStore();
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
-    let list = PRODUCTS.filter((p) => {
+    let list: Product[] = products.filter((p) => {
       if (q && !`${p.name} ${p.category} ${p.tags.join(" ")}`.toLowerCase().includes(q)) return false;
       if (filters.categories.length && !filters.categories.includes(p.category)) return false;
       if (p.price < filters.price[0] || p.price > filters.price[1]) return false;
@@ -58,7 +60,7 @@ function Catalog() {
         list = smartFeed(list);
     }
     return list;
-  }, [query, filters]);
+  }, [products, query, filters]);
 
   return (
     <div className="min-h-screen bg-background">

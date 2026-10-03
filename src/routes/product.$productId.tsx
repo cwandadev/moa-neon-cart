@@ -1,4 +1,4 @@
-import { createFileRoute, Link, notFound } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
@@ -10,16 +10,12 @@ import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/product/$productId")({
-  loader: ({ params }) => {
-    const product = getProduct(params.productId);
-    if (!product) throw notFound();
-    return { product };
-  },
+  loader: ({ params }) => ({ product: getProduct(params.productId) ?? null }),
   head: ({ loaderData }) => {
-    if (!loaderData) {
-      return { meta: [{ title: "Product unavailable — MOA Mart" }, { name: "robots", content: "noindex" }] };
+    const product = loaderData?.product;
+    if (!product) {
+      return { meta: [{ title: "Product — MOA Mart" }, { name: "robots", content: "noindex" }] };
     }
-    const { product } = loaderData;
     const title = `${product.name} — MOA Mart`;
     return {
       meta: [
@@ -34,10 +30,35 @@ export const Route = createFileRoute("/product/$productId")({
 });
 
 function ProductDetail() {
-  const { product } = Route.useLoaderData();
-  const { addToCart, toggleWishlist, isWished, setCartOpen } = useStore();
+  const { productId } = Route.useParams();
+  const { products, productsReady, addToCart, toggleWishlist, isWished, setCartOpen } = useStore();
   const [active, setActive] = useState(0);
   const [checkout, setCheckout] = useState(false);
+  const product = products.find((p) => p.id === productId);
+
+  if (!product) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Header />
+        <main className="mx-auto w-full max-w-7xl px-4 py-16 text-center sm:px-6">
+          {productsReady ? (
+            <>
+              <h1 className="font-display text-2xl font-bold">Product not found</h1>
+              <p className="mt-2 font-body text-sm text-muted-foreground">
+                This product does not exist or was removed.
+              </p>
+              <Link to="/" className="mt-6 inline-block font-body text-sm text-primary hover:underline">
+                Back to catalog
+              </Link>
+            </>
+          ) : (
+            <p className="font-body text-sm text-muted-foreground">Loading...</p>
+          )}
+        </main>
+      </div>
+    );
+  }
+
   const wished = isWished(product.id);
 
   return (
@@ -143,7 +164,7 @@ function ProductDetail() {
               </Button>
             </div>
 
-            <ul className="mt-6 grid gap-2 sm:grid-cols-2">
+            <ul className={cn("mt-6 grid gap-2 sm:grid-cols-2", product.highlights.length === 0 && "hidden")}>
               {product.highlights.map((h) => (
                 <li key={h} className="flex items-start gap-2 font-body text-sm text-muted-foreground">
                   <i className="bx bx-check-circle mt-0.5 text-accent" /> {h}
@@ -152,7 +173,7 @@ function ProductDetail() {
             </ul>
 
             <Accordion type="multiple" className="mt-8">
-              <AccordionItem value="specs">
+              <AccordionItem value="specs" className={cn(product.specs.length === 0 && "hidden")}>
                 <AccordionTrigger className="font-display">Specifications</AccordionTrigger>
                 <AccordionContent>
                   <dl className="grid gap-2">
@@ -168,7 +189,7 @@ function ProductDetail() {
                   </dl>
                 </AccordionContent>
               </AccordionItem>
-              <AccordionItem value="care">
+              <AccordionItem value="care" className={cn(!product.care && "hidden")}>
                 <AccordionTrigger className="font-display">Care & handling</AccordionTrigger>
                 <AccordionContent className="font-body text-sm text-muted-foreground">
                   {product.care}
@@ -180,7 +201,7 @@ function ProductDetail() {
                   {product.shipping}
                 </AccordionContent>
               </AccordionItem>
-              <AccordionItem value="refs">
+              <AccordionItem value="refs" className={cn(product.references.length === 0 && "hidden")}>
                 <AccordionTrigger className="font-display">Reference links</AccordionTrigger>
                 <AccordionContent>
                   <ul className="grid gap-2">

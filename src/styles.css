@@ -192,3 +192,140 @@
     display: none;
   }
 }
+
+/* ============ MOA ADMIN (ported grayscale look, scoped to /admin) ============ */
+@theme inline {
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-neon: var(--neon);
+}
+
+.moa-admin,
+.moa-admin-dialog {
+  --background: oklch(0.12 0 0);
+  --foreground: oklch(0.98 0 0);
+  --card: oklch(0.17 0 0);
+  --card-foreground: oklch(0.98 0 0);
+  --popover: oklch(0.15 0 0);
+  --popover-foreground: oklch(0.98 0 0);
+  --primary: oklch(0.98 0 0);
+  --primary-foreground: oklch(0.12 0 0);
+  --secondary: oklch(0.22 0 0);
+  --secondary-foreground: oklch(0.96 0 0);
+  --muted: oklch(0.2 0 0);
+  --muted-foreground: oklch(0.68 0 0);
+  --accent: oklch(0.85 0 0);
+  --accent-foreground: oklch(0.12 0 0);
+  --destructive: oklch(0.72 0 0);
+  --destructive-foreground: oklch(0.12 0 0);
+  --border: oklch(0.28 0 0);
+  --input: oklch(0.28 0 0);
+  --ring: oklch(0.9 0 0);
+  --radius: 0.9rem;
+  --success: oklch(0.9 0 0);
+  --warning: oklch(0.78 0 0);
+  --neon: oklch(1 0 0);
+  --sidebar: oklch(0.14 0 0);
+  --sidebar-foreground: oklch(0.96 0 0);
+  --sidebar-primary: oklch(0.98 0 0);
+  --sidebar-primary-foreground: oklch(0.12 0 0);
+  --sidebar-accent: oklch(0.22 0 0);
+  --sidebar-accent-foreground: oklch(0.96 0 0);
+  --sidebar-border: oklch(0.26 0 0);
+  --sidebar-ring: oklch(0.9 0 0);
+  --gradient-neon: linear-gradient(120deg, oklch(1 0 0), oklch(0.78 0 0));
+  --glass: color-mix(in oklab, oklch(0.2 0 0) 62%, transparent);
+  --shadow-neon: 0 0 0 1px color-mix(in oklab, oklch(1 0 0) 18%, transparent),
+    0 18px 50px -22px color-mix(in oklab, oklch(1 0 0) 35%, transparent);
+
+  color-scheme: dark;
+  min-height: 100vh;
+  color: var(--foreground);
+  background-color: #000000;
+  background-image:
+    radial-gradient(900px 500px at 12% -8%, rgba(255,255,255,0.06), transparent),
+    radial-gradient(800px 480px at 92% 4%, rgba(255,255,255,0.04), transparent);
+  background-attachment: fixed;
+}
+
+/* dialogs render in a portal outside the admin wrapper: same tokens, plain card background */
+.moa-admin-dialog {
+  min-height: 0;
+  background-color: var(--card);
+  background-image: none;
+  background-attachment: scroll;
+}
+
+.moa-admin ::-webkit-scrollbar { width: 8px; height: 8px; }
+.moa-admin ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+
+@layer utilities {
+  .moa-admin .glass {
+    background: var(--glass);
+    backdrop-filter: blur(18px);
+    border: 1px solid #262626;
+  }
+  .moa-admin .hairline {
+    border: 1px solid #262626;
+  }
+  .moa-admin .neon-text {
+    background: var(--gradient-neon);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .moa-admin .neon-ring {
+    box-shadow: var(--shadow-neon);
+  }
+  .moa-admin .card-hover {
+    transition: transform 320ms cubic-bezier(.2,.8,.2,1), box-shadow 320ms, border-color 320ms;
+  }
+  .moa-admin .card-hover:hover {
+    transform: translateY(-4px);
+    border-color: color-mix(in oklab, var(--neon) 45%, transparent);
+    box-shadow: var(--shadow-neon);
+  }
+}
+
+/* moa-admin-mobile: phone/tablet performance, desktop (>=1024px) untouched */
+@media (max-width: 1023px) {
+  .moa-admin {
+    background-attachment: scroll;
+  }
+  .moa-admin .glass,
+  .moa-admin aside,
+  .moa-admin [class*="backdrop-blur"] {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .moa-admin .glass {
+    background: color-mix(in oklab, oklch(0.2 0 0) 92%, transparent);
+  }
+  .moa-admin aside {
+    background-color: #000000;
+  }
+  .moa-admin .card-hover,
+  .moa-admin .card-hover:hover {
+    transform: none;
+    transition: none;
+  }
+}
+
+/* moa-admin-desktop: same blur/fixed-background removal for desktop (>=1024px) */
+@media (min-width: 1024px) {
+  .moa-admin {
+    background-attachment: scroll;
+  }
+  .moa-admin .glass,
+  .moa-admin aside,
+  .moa-admin [class*="backdrop-blur"] {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .moa-admin .glass {
+    background: color-mix(in oklab, oklch(0.2 0 0) 92%, transparent);
+  }
+  .moa-admin aside {
+    background-color: #000000;
+  }
+}
