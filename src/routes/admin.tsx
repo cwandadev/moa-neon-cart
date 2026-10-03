@@ -24,6 +24,7 @@ const NAV = [
   { to: "/admin", label: "Overview", icon: "bx-grid-alt", exact: true },
   { to: "/admin/analytics", label: "Analytics Center", icon: "bx-line-chart" },
   { to: "/admin/inventory", label: "Live Inventory", icon: "bx-box" },
+  { to: "/admin/products", label: "Product Management", icon: "bx-package" },
   { to: "/admin/finance", label: "Financial Overview", icon: "bx-wallet" },
   { to: "/admin/inbox", label: "Chat Inbox", icon: "bx-conversation" },
   { to: "/admin/orders", label: "WhatsApp Orders", icon: "bxl-whatsapp" },

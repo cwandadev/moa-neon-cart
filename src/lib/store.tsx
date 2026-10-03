@@ -1,10 +1,22 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
-import { PRODUCTS, type Product } from "./products";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { PRODUCTS, type Category, type Product } from "./products";
 
 export type CartItem = { product: Product; qty: number };
 export type ChatMessage = { id: string; from: "client" | "staff"; text: string; at: string };
 
 export type AdminProduct = Product & { sku: string; cost: number };
+
+export type ProductInput = {
+  name: string;
+  category: Category;
+  price: number;
+  oldPrice?: number | undefined;
+  stock: number;
+  images: string[];
+  blurb: string;
+  description: string;
+  tags: string[];
+};
 
 export type OrderStatus =
   | "Pending Confirmation"
@@ -150,12 +162,45 @@ type StoreValue = {
   threads: AdminThread[];
   toggleStock: (id: string) => void;
   updateStock: (id: string, stock: number) => void;
+  addProduct: (input: ProductInput) => void;
+  updateProduct: (id: string, input: ProductInput) => void;
+  deleteProduct: (id: string) => void;
+  resetProducts: () => void;
+  productsReady: boolean;
   addOrder: (o: Omit<WhatsAppOrder, "id" | "status" | "createdAt">) => void;
   setOrderStatus: (id: string, s: OrderStatus) => void;
   sendStaffMessage: (threadId: string, body: string) => void;
 };
 
 const StoreContext = createContext<StoreValue | null>(null);
+
+const PRODUCTS_KEY = "moa-products-v1";
+
+const buildSeedProducts = (): AdminProduct[] =>
+  PRODUCTS.map((p, i) => ({
+    ...p,
+    sku: `MOA-${p.category.slice(0, 2).toUpperCase()}-${1000 + i}`,
+    cost: Math.round(p.price * 0.58),
+  }));
+
+const isStoredProduct = (x: unknown): x is AdminProduct => {
+  if (typeof x !== "object" || x === null) return false;
+  const p = x as Partial<Record<keyof AdminProduct, unknown>>;
+  return (
+    typeof p.id === "string" &&
+    typeof p.name === "string" &&
+    typeof p.category === "string" &&
+    typeof p.sku === "string" &&
+    typeof p.price === "number" &&
+    typeof p.cost === "number" &&
+    typeof p.stock === "number" &&
+    Array.isArray(p.images) &&
+    Array.isArray(p.tags) &&
+    Array.isArray(p.specs) &&
+    Array.isArray(p.highlights) &&
+    Array.isArray(p.references)
+  );
+};
 
 const now = () => new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
 
@@ -167,13 +212,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
-  const [products, setProducts] = useState<AdminProduct[]>(() =>
-    PRODUCTS.map((p, i) => ({
-      ...p,
-      sku: `MOA-${p.category.slice(0, 2).toUpperCase()}-${1000 + i}`,
-      cost: Math.round(p.price * 0.58),
-    })),
-  );
+  const [products, setProducts] = useState<AdminProduct[]>(buildSeedProducts);
+  const [productsLoaded, setProductsLoaded] = useState(false);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(PRODUCTS_KEY);
+      if (raw) {
+        const parsed: unknown = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.every(isStoredProduct)) setProducts(parsed);
+      }
+    } catch {
+      // unreadable saved data: keep the seed products
+    }
+    setProductsLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!productsLoaded) return;
+    try {
+      window.localStorage.setItem(PRODUCTS_KEY, JSON.stringify(products));
+    } catch {
+      // storage full or blocked: changes stay in memory only
+    }
+  }, [products, productsLoaded]);
   const [orders, setOrders] = useState<WhatsAppOrder[]>(seedOrders);
   const [threads, setThreads] = useState<AdminThread[]>(seedThreads);
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -206,6 +268,60 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         p.id === id ? { ...p, stock: Math.max(0, stock), inStock: Math.max(0, stock) > 0 } : p,
       ),
     );
+  }, []);
+
+  const addProduct = useCallback((input: ProductInput) => {
+    const id = `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    setProducts((ps) => {
+      const nums = ps.map((p) => Number(p.sku.split("-").pop())).filter((n) => Number.isFinite(n));
+      const next = (nums.length ? Math.max(...nums) : 1000) + 1;
+      const created: AdminProduct = {
+        id,
+        name: input.name,
+        category: input.category,
+        price: input.price,
+        oldPrice: input.oldPrice,
+        rating: 4.5,
+        reviews: 0,
+        stock: input.stock,
+        inStock: input.stock > 0,
+        images: input.images,
+        videoPreview: false,
+        blurb: input.blurb,
+        description: input.description,
+        specs: [],
+        highlights: [],
+        care: "",
+        shipping: "Ships within 1-3 business days.",
+        references: [],
+        clicks: 0,
+        wishlists: 0,
+        orders: 0,
+        createdDaysAgo: 0,
+        tags: input.tags,
+        sku: `MOA-${input.category.slice(0, 2).toUpperCase()}-${next}`,
+        cost: Math.round(input.price * 0.58),
+      };
+      return [created, ...ps];
+    });
+  }, []);
+
+  const updateProduct = useCallback((id: string, input: ProductInput) => {
+    setProducts((ps) =>
+      ps.map((p) =>
+        p.id === id
+          ? { ...p, ...input, inStock: input.stock > 0, cost: Math.round(input.price * 0.58) }
+          : p,
+      ),
+    );
+  }, []);
+
+  const deleteProduct = useCallback((id: string) => {
+    setProducts((ps) => ps.filter((p) => p.id !== id));
+  }, []);
+
+  const resetProducts = useCallback(() => {
+    setProducts(buildSeedProducts());
   }, []);
 
   const addOrder = useCallback((o: Omit<WhatsAppOrder, "id" | "status" | "createdAt">) => {
@@ -287,6 +403,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       threads,
       toggleStock,
       updateStock,
+      addProduct,
+      updateProduct,
+      deleteProduct,
+      resetProducts,
+      productsReady: productsLoaded,
       addOrder,
       setOrderStatus,
       sendStaffMessage,
@@ -307,7 +428,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             : []),
         ]),
     };
-  }, [wishlist, toggleWishlist, cart, addToCart, cartOpen, chatOpen, messages, products, orders, threads, toggleStock, updateStock, addOrder, setOrderStatus, sendStaffMessage]);
+  }, [wishlist, toggleWishlist, cart, addToCart, cartOpen, chatOpen, messages, products, orders, threads, toggleStock, updateStock, addProduct, updateProduct, deleteProduct, resetProducts, productsLoaded, addOrder, setOrderStatus, sendStaffMessage]);
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }

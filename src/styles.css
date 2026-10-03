@@ -200,7 +200,8 @@
   --color-neon: var(--neon);
 }
 
-.moa-admin {
+.moa-admin,
+.moa-admin-dialog {
   --background: oklch(0.12 0 0);
   --foreground: oklch(0.98 0 0);
   --card: oklch(0.17 0 0);
@@ -245,6 +246,14 @@
     radial-gradient(900px 500px at 12% -8%, rgba(255,255,255,0.06), transparent),
     radial-gradient(800px 480px at 92% 4%, rgba(255,255,255,0.04), transparent);
   background-attachment: fixed;
+}
+
+/* dialogs render in a portal outside the admin wrapper: same tokens, plain card background */
+.moa-admin-dialog {
+  min-height: 0;
+  background-color: var(--card);
+  background-image: none;
+  background-attachment: scroll;
 }
 
 .moa-admin ::-webkit-scrollbar { width: 8px; height: 8px; }
