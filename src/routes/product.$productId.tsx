@@ -5,12 +5,13 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Header } from "@/components/shop/Header";
 import { StockBadge } from "@/components/shop/ProductCard";
 import { CheckoutDialog } from "@/components/shop/CheckoutDialog";
-import { getProduct, money } from "@/lib/products";
+import { money } from "@/lib/products";
+import { fetchProduct } from "@/lib/catalog";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/product/$productId")({
-  loader: ({ params }) => ({ product: getProduct(params.productId) ?? null }),
+  loader: ({ params }) => fetchProduct(params.productId).then((product) => ({ product })),
   head: ({ loaderData }) => {
     const product = loaderData?.product;
     if (!product) {
@@ -30,30 +31,23 @@ export const Route = createFileRoute("/product/$productId")({
 });
 
 function ProductDetail() {
-  const { productId } = Route.useParams();
-  const { products, productsReady, addToCart, toggleWishlist, isWished, setCartOpen } = useStore();
+  const { product } = Route.useLoaderData();
+  const { addToCart, toggleWishlist, isWished, setCartOpen } = useStore();
   const [active, setActive] = useState(0);
   const [checkout, setCheckout] = useState(false);
-  const product = products.find((p) => p.id === productId);
 
   if (!product) {
     return (
       <div className="min-h-screen bg-background">
         <Header />
         <main className="mx-auto w-full max-w-7xl px-4 py-16 text-center sm:px-6">
-          {productsReady ? (
-            <>
-              <h1 className="font-display text-2xl font-bold">Product not found</h1>
-              <p className="mt-2 font-body text-sm text-muted-foreground">
-                This product does not exist or was removed.
-              </p>
-              <Link to="/" className="mt-6 inline-block font-body text-sm text-primary hover:underline">
-                Back to catalog
-              </Link>
-            </>
-          ) : (
-            <p className="font-body text-sm text-muted-foreground">Loading...</p>
-          )}
+          <h1 className="font-display text-2xl font-bold">Product not found</h1>
+          <p className="mt-2 font-body text-sm text-muted-foreground">
+            This product does not exist or was removed.
+          </p>
+          <Link to="/" className="mt-6 inline-block font-body text-sm text-primary hover:underline">
+            Back to catalog
+          </Link>
         </main>
       </div>
     );
@@ -133,13 +127,13 @@ function ProductDetail() {
 
             <div className="mt-6 flex flex-wrap gap-3">
               <Button
-                variant="whatsapp"
+                variant="glass"
                 size="lg"
                 className="rounded-xl font-body"
                 disabled={!product.inStock}
                 onClick={() => setCheckout(true)}
               >
-                <i className="bx bxl-whatsapp text-xl" /> Buy now on WhatsApp
+                <i className="bx bx-credit-card text-xl" /> Buy now
               </Button>
               <Button
                 variant="neon"

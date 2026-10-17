@@ -1,4 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useAuth } from "./auth";
+import { supabase } from "./supabase";
+import { useNavigate } from "@tanstack/react-router";
+import { toast } from "sonner";
+import { showWishlistToast } from "@/components/shop/wishToast";
 import { PRODUCTS, type Category, type Product } from "./products";
 
 export type CartItem = { product: Product; qty: number };
@@ -205,10 +210,33 @@ const isStoredProduct = (x: unknown): x is AdminProduct => {
 const now = () => new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
 
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const [wishlist, setWishlist] = useState<string[]>([
-    PRODUCTS[0]?.id ?? "",
-    PRODUCTS[8]?.id ?? "",
-  ]);
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
+  const navigate = useNavigate();
+  const [wishlist, setWishlist] = useState<string[]>([]);
+
+  // Wishlist lives in the database, one list per signed-in user.
+  useEffect(() => {
+    if (!userId) {
+      setWishlist([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { data } = await supabase
+          .from("wishlist_items")
+          .select("product_id")
+          .order("created_at", { ascending: false });
+        if (!cancelled) setWishlist((data ?? []).map((r) => r.product_id as string));
+      } catch {
+        if (!cancelled) setWishlist([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
@@ -242,9 +270,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     { id: "m1", from: "staff", text: "Hi 👋 Welcome to MOA Mart. How can we help you today?", at: "09:12" },
   ]);
 
-  const toggleWishlist = useCallback((id: string) => {
-    setWishlist((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-  }, []);
+  const toggleWishlist = useCallback(
+    (id: string) => {
+      if (!userId) {
+        toast("Log in to save items to your wishlist");
+        void navigate({ to: "/login" });
+        return;
+      }
+      const has = wishlist.includes(id);
+      if (has) showWishlistToast(false);
+      else showWishlistToast(true, () => void navigate({ to: "/wishlist" }));
+      setWishlist((prev) => (has ? prev.filter((x) => x !== id) : [...prev, id]));
+      void (async () => {
+        try {
+          const { error } = has
+            ? await supabase.from("wishlist_items").delete().eq("user_id", userId).eq("product_id", id)
+            : await supabase.from("wishlist_items").insert({ user_id: userId, product_id: id });
+          if (error) throw error;
+        } catch {
+          setWishlist((prev) => (has ? [...prev, id] : prev.filter((x) => x !== id)));
+          toast.error("Could not update your wishlist. Please try again.");
+        }
+      })();
+    },
+    [userId, wishlist, navigate],
+  );
 
   const addToCart = useCallback((product: Product, qty = 1) => {
     setCart((prev) => {

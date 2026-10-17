@@ -61,14 +61,26 @@ export function Kpi({
 export function StatusPill({ status }: { status: string }) {
   const map: Record<string, string> = {
     "Pending Confirmation": "text-warning bg-warning/10",
-    "Payment Verified": "text-primary bg-primary/10",
-    "Out for Delivery": "text-accent bg-accent/10",
+    "Payment Verified": "text-info bg-info/10",
+    "Out for Delivery": "text-info bg-info/10",
     Fulfilled: "text-success bg-success/10",
     Cancelled: "text-destructive bg-destructive/10",
+    awaiting_payment: "text-warning bg-warning/10",
+    paid: "text-success bg-success/10",
+    failed: "text-destructive bg-destructive/10",
+    expired: "text-destructive bg-destructive/10",
+    pending: "text-warning bg-warning/10",
+    confirmed: "text-info bg-info/10",
+    out_for_delivery: "text-info bg-info/10",
+    delivered: "text-success bg-success/10",
+    cancelled: "text-destructive bg-destructive/10",
   };
+  const label = /^[a-z_]+$/.test(status)
+    ? status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+    : status;
   return (
     <span className={`rounded-full px-2.5 py-1 text-[11px] ${map[status] ?? "bg-muted"}`}>
-      {status}
+      {label}
     </span>
   );
 }

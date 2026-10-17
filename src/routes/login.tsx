@@ -21,9 +21,10 @@ function Login() {
     if (ready && user) navigate({ to: "/" });
   }, [ready, user, navigate]);
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const r = logIn(email, password);
+    setError("");
+    const r = await logIn(email, password);
     if (!r.ok) setError(r.error);
   };
 
@@ -40,11 +41,19 @@ function Login() {
       <SocialButtons onSocial={socialLogin} />
       <form onSubmit={submit} className="space-y-3">
         <Field label="Email">
-          <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="eg. johnfrans@gmail.com" className={inputClass} autoComplete="email" />
+          <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="eg. alice@gmail.com" className={inputClass} autoComplete="email" />
         </Field>
         <Field label="Password">
           <PasswordInput value={password} onChange={setPassword} placeholder="Enter your password" />
         </Field>
+        <div className="flex justify-end">
+          <Link
+            to="/forgot-password"
+            className="font-body text-xs text-muted-foreground hover:text-foreground"
+          >
+            Forgot password?
+          </Link>
+        </div>
         {error && <p className="font-body text-sm text-destructive">{error}</p>}
         <Button type="submit" className="h-10 w-full rounded-xl bg-foreground text-background shadow-none hover:bg-foreground/90">Log In</Button>
       </form>

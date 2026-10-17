@@ -1,4 +1,6 @@
 import { Link } from "@tanstack/react-router";
+import { useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { money, stockLabel, type Product } from "@/lib/products";
@@ -25,6 +27,7 @@ export function StockBadge({ product, className }: { product: Product; className
 export function ProductCard({ product }: { product: Product }) {
   const { toggleWishlist, isWished, addToCart, setCartOpen } = useStore();
   const wished = isWished(product.id);
+  const [added, setAdded] = useState(false);
 
   return (
     <article className="group relative flex flex-col overflow-hidden rounded-2xl border border-border bg-card hover:-translate-y-1 hover:border-primary/40 hover:shadow-[0_20px_50px_-24px_var(--primary)]">
@@ -43,7 +46,7 @@ export function ProductCard({ product }: { product: Product }) {
           {product.category}
         </span>
         {product.createdDaysAgo < 25 && (
-          <span className="absolute right-3 top-3 rounded-full bg-primary px-2.5 py-1 font-body text-[11px] font-semibold text-primary-foreground">
+          <span className="absolute bottom-3 left-3 rounded-full bg-primary px-2.5 py-1 font-body text-[11px] font-semibold text-primary-foreground">
             New
           </span>
         )}
@@ -54,7 +57,7 @@ export function ProductCard({ product }: { product: Product }) {
         aria-label="Toggle wishlist"
         onClick={() => toggleWishlist(product.id)}
         className={cn(
-          "absolute right-3 top-12 grid h-9 w-9 place-items-center rounded-full border border-border bg-background/90 transition-colors",
+          "absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-full border border-border bg-background/90 transition-colors",
           wished ? "text-accent" : "text-muted-foreground hover:text-foreground",
         )}
       >
@@ -95,10 +98,15 @@ export function ProductCard({ product }: { product: Product }) {
             aria-label="Add to cart"
             onClick={() => {
               addToCart(product);
-              setCartOpen(true);
+              setAdded(true);
+              window.setTimeout(() => setAdded(false), 1200);
+              toast.success("Added to cart", {
+                description: product.name,
+                action: { label: "View cart", onClick: () => setCartOpen(true) },
+              });
             }}
           >
-            <i className="bx bx-plus text-xl" />
+            <i className={cn("text-xl", added ? "bx bx-check" : "bx bx-plus")} />
           </Button>
         </div>
       </div>

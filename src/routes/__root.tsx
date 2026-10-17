@@ -12,6 +12,8 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { StoreProvider } from "../lib/store";
+import { Toaster } from "../components/ui/sonner";
+import { NotificationsHost } from "../lib/notifications";
 import { AuthProvider } from "../lib/auth";
 import { CartDrawer } from "../components/shop/CartDrawer";
 import { SupportChat } from "../components/shop/SupportChat";
@@ -83,13 +85,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "MOA Mart" },
-      { name: "description", content: "Futuristic minimal storefront with instant WhatsApp checkout." },
+      { name: "description", content: "Shop clothing, shoes, kitchen items, electronics and more at MOA Mart." },
       { name: "author", content: "MOA Mart" },
       { property: "og:title", content: "MOA Mart" },
-      { property: "og:description", content: "Futuristic minimal storefront with instant WhatsApp checkout." },
+      { property: "og:description", content: "Shop clothing, shoes, kitchen items, electronics and more at MOA Mart." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
-      { name: "twitter:site", content: "@Lovable" },
+      
       { name: "theme-color", content: "#0a0d13" },
     ],
     links: [
@@ -149,6 +151,8 @@ function RootComponent() {
         <CartDrawer />
         <SupportChat />
         <BottomNav />
+      <Toaster position="top-center" />
+      <NotificationsHost />
       </StoreProvider>
       </AuthProvider>
     </QueryClientProvider>

@@ -16,7 +16,7 @@ export function CartDrawer() {
           <SheetHeader>
             <SheetTitle className="font-display">Your cart</SheetTitle>
             <SheetDescription className="font-body">
-              Checkout is completed over WhatsApp with our sales desk.
+              Review your items, then continue to checkout.
             </SheetDescription>
           </SheetHeader>
 
@@ -75,13 +75,13 @@ export function CartDrawer() {
               <span className="text-xl font-semibold text-primary">{money(cartTotal)}</span>
             </div>
             <Button
-              variant="whatsapp"
+              variant="neon"
               size="lg"
               className="w-full"
               disabled={cart.length === 0}
               onClick={() => setCheckout(true)}
             >
-              <i className="bx bxl-whatsapp text-xl" /> Order via WhatsApp
+              <i className="bx bx-credit-card text-xl" /> Checkout
             </Button>
           </div>
         </SheetContent>
