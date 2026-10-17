@@ -1,7 +1,7 @@
 {
   "name": "MOA Mart",
   "short_name": "MOA Mart",
-  "description": "Futuristic minimal storefront with instant WhatsApp checkout.",
+  "description": "Shop clothing, shoes, kitchen items, electronics and more at MOA Mart.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

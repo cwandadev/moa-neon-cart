@@ -7,11 +7,10 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { supabase } from "./supabase";
 
-// DEMO ONLY: users live in this browser's localStorage and the admin
-// password is visible in the code. Replace with real auth (Supabase) later.
+export type Role = "customer" | "staff" | "admin";
 
-export type Role = "user" | "admin";
 export type AuthUser = {
   id: string;
   firstName: string;
@@ -19,154 +18,213 @@ export type AuthUser = {
   email: string;
   role: Role;
 };
-type StoredUser = AuthUser & { password: string };
-export type AuthResult = { ok: true } | { ok: false; error: string };
 
-const USERS_KEY = "moa-demo-users";
-const SESSION_KEY = "moa-demo-session";
-
-const DEMO_ADMIN: StoredUser = {
-  id: "admin-1",
-  firstName: "Admin",
-  lastName: "MOA",
-  email: "admin@moamart.com",
-  password: "Admin1234",
-  role: "admin",
-};
-
-const normEmail = (e: string) => e.trim().toLowerCase();
-
-function readUsers(): StoredUser[] {
-  try {
-    const raw = localStorage.getItem(USERS_KEY);
-    return raw ? (JSON.parse(raw) as StoredUser[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeUsers(users: StoredUser[]) {
-  try {
-    localStorage.setItem(USERS_KEY, JSON.stringify(users));
-  } catch {
-    /* storage blocked: ignore */
-  }
-}
-
-function setSession(email: string | null) {
-  try {
-    if (email) localStorage.setItem(SESSION_KEY, email);
-    else localStorage.removeItem(SESSION_KEY);
-  } catch {
-    /* storage blocked: ignore */
-  }
-}
-
-function findUser(email: string): StoredUser | undefined {
-  const e = normEmail(email);
-  return [DEMO_ADMIN, ...readUsers()].find((u) => u.email === e);
-}
-
-function publicUser(u: StoredUser): AuthUser {
-  return {
-    id: u.id,
-    firstName: u.firstName,
-    lastName: u.lastName,
-    email: u.email,
-    role: u.role,
-  };
-}
+export type AuthResult = { ok: true; notice?: string } | { ok: false; error: string };
 
 type AuthValue = {
   user: AuthUser | null;
   ready: boolean;
   isAdmin: boolean;
+  isStaff: boolean;
   signUp: (d: {
     firstName: string;
     lastName: string;
     email: string;
     password: string;
-  }) => AuthResult;
-  logIn: (email: string, password: string) => AuthResult;
+  }) => Promise<AuthResult>;
+  logIn: (email: string, password: string) => Promise<AuthResult>;
   socialLogin: (provider: "google" | "facebook") => void;
   logOut: () => void;
+  /** Returns a user id usable for RLS (anonymous sessions included), or null. */
+  ensureSession: () => Promise<string | null>;
+  /** Reloads the profile (name, role) after it changed. */
+  refreshProfile: () => void;
 };
 
 const AuthContext = createContext<AuthValue | null>(null);
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [ready, setReady] = useState(false);
+const normEmail = (e: string) => e.trim().toLowerCase();
 
+function friendlyAuthError(message: string): string {
+  const m = message.toLowerCase();
+  if (m.includes("invalid login credentials")) return "Wrong email or password.";
+  if (m.includes("already registered")) return "An account with this email already exists.";
+  if (m.includes("email not confirmed"))
+    return "Please confirm your email first — check your inbox for the link.";
+  if (m.includes("password should be at least")) return "Password must be at least 8 characters.";
+  if (m.includes("rate limit") || m.includes("too many"))
+    return "Too many attempts. Please wait a moment and try again.";
+  return message;
+}
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [profile, setProfile] = useState<AuthUser | null>(null);
+  const [sessionUserId, setSessionUserId] = useState<string | null>(null);
+  const [sessionEmail, setSessionEmail] = useState("");
+  const [sessionAnon, setSessionAnon] = useState(true);
+  const [ready, setReady] = useState(false);
+  const [profileTick, setProfileTick] = useState(0);
+
+  // Remove leftovers from the old localStorage demo login.
   useEffect(() => {
     try {
-      const email = localStorage.getItem(SESSION_KEY);
-      const found = email ? findUser(email) : undefined;
-      if (found) setUser(publicUser(found));
+      localStorage.removeItem("moa-demo-users");
+      localStorage.removeItem("moa-demo-session");
     } catch {
-      /* ignore */
+      /* storage blocked: ignore */
     }
-    setReady(true);
   }, []);
 
-  const signUp = useCallback<AuthValue["signUp"]>((d) => {
+  // Resolve the initial session once.
+  useEffect(() => {
+    let cancelled = false;
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (cancelled) return;
+        const u = data.session?.user;
+        if (u) {
+          setSessionUserId(u.id);
+          setSessionEmail(u.email ?? "");
+          setSessionAnon(Boolean(u.is_anonymous));
+        }
+        setReady(true);
+      })
+      .catch(() => {
+        if (!cancelled) setReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Track auth state. No Supabase queries are awaited inside this callback
+  // (documented deadlock risk) — profile loading lives in its own effect.
+  useEffect(() => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_OUT") {
+        setSessionUserId(null);
+        setSessionEmail("");
+        setProfile(null);
+        setReady(true);
+        return;
+      }
+      const u = session?.user;
+      if (u) {
+        setSessionUserId(u.id);
+        setSessionEmail(u.email ?? "");
+        setSessionAnon(Boolean(u.is_anonymous));
+        setReady(true);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // Load the profile (name + role) for real users; guests stay user: null so
+  // login/register pages and the UserMenu keep behaving exactly as before.
+  useEffect(() => {
+    if (!sessionUserId || sessionAnon) {
+      setProfile(null);
+      return;
+    }
+    let cancelled = false;
+    setProfile(null);
+    void (async () => {
+      try {
+        const { data } = await supabase
+          .from("profiles")
+          .select("first_name, last_name, role")
+          .eq("id", sessionUserId)
+          .maybeSingle();
+        if (cancelled || !data) return;
+        setProfile({
+          id: sessionUserId,
+          firstName: data.first_name ?? "",
+          lastName: data.last_name ?? "",
+          email: sessionEmail,
+          role: (data.role as Role) ?? "customer",
+        });
+      } catch {
+        if (!cancelled) setProfile(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionUserId, sessionEmail, sessionAnon, profileTick]);
+
+  const signUp = useCallback<AuthValue["signUp"]>(async (d) => {
     const firstName = d.firstName.trim();
     const lastName = d.lastName.trim();
     const email = normEmail(d.email);
     if (!firstName || !lastName) return { ok: false, error: "Please enter your first and last name." };
     if (!/^\S+@\S+\.\S+$/.test(email)) return { ok: false, error: "Please enter a valid email." };
     if (d.password.length < 8) return { ok: false, error: "Password must be at least 8 characters." };
-    if (findUser(email)) return { ok: false, error: "An account with this email already exists." };
-    const created: StoredUser = {
-      id: "u-" + Date.now(),
-      firstName,
-      lastName,
+
+    const { data, error } = await supabase.auth.signUp({
       email,
       password: d.password,
-      role: "user",
-    };
-    writeUsers([...readUsers(), created]);
-    setSession(email);
-    setUser(publicUser(created));
+      options: { data: { first_name: firstName, last_name: lastName } },
+    });
+    if (error) return { ok: false, error: friendlyAuthError(error.message) };
+    if (!data.session) {
+      return { ok: true, notice: "Check your email to confirm your account, then log in." };
+    }
     return { ok: true };
   }, []);
 
-  const logIn = useCallback<AuthValue["logIn"]>((emailRaw, password) => {
-    const found = findUser(emailRaw);
-    if (!found || found.password !== password) {
-      return { ok: false, error: "Wrong email or password." };
-    }
-    setSession(found.email);
-    setUser(publicUser(found));
+  const logIn = useCallback<AuthValue["logIn"]>(async (emailRaw, password) => {
+    const { error } = await supabase.auth.signInWithPassword({
+      email: normEmail(emailRaw),
+      password,
+    });
+    if (error) return { ok: false, error: friendlyAuthError(error.message) };
     return { ok: true };
   }, []);
 
   const socialLogin = useCallback<AuthValue["socialLogin"]>((provider) => {
-    const email = "demo." + provider + "@moamart.demo";
-    let found = findUser(email);
-    if (!found) {
-      found = {
-        id: "u-" + provider,
-        firstName: provider === "google" ? "Google" : "Facebook",
-        lastName: "User",
-        email,
-        password: "",
-        role: "user",
-      };
-      writeUsers([...readUsers(), found]);
-    }
-    setSession(found.email);
-    setUser(publicUser(found));
+    void supabase.auth
+      .signInWithOAuth({
+        provider,
+        options: { redirectTo: typeof window === "undefined" ? "/" : window.location.origin },
+      })
+      .then(({ error }) => {
+        if (error) console.error("Social login failed:", error.message);
+      });
   }, []);
 
   const logOut = useCallback(() => {
-    setSession(null);
-    setUser(null);
+    void supabase.auth.signOut();
+  }, []);
+
+  const ensureSession = useCallback<AuthValue["ensureSession"]>(async () => {
+    try {
+      const { data } = await supabase.auth.getSession();
+      if (data.session) return data.session.user.id;
+      const { data: res, error } = await supabase.auth.signInAnonymously();
+      if (error) return null;
+      return res.user?.id ?? null;
+    } catch {
+      return null;
+    }
   }, []);
 
   const value = useMemo<AuthValue>(
-    () => ({ user, ready, isAdmin: user?.role === "admin", signUp, logIn, socialLogin, logOut }),
-    [user, ready, signUp, logIn, socialLogin, logOut],
+    () => ({
+      user: profile,
+      ready,
+      isAdmin: profile?.role === "admin",
+      isStaff: profile?.role === "staff" || profile?.role === "admin",
+      signUp,
+      logIn,
+      socialLogin,
+      logOut,
+      ensureSession,
+      refreshProfile: () => setProfileTick((n) => n + 1),
+    }),
+    [profile, ready, signUp, logIn, socialLogin, logOut, ensureSession],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -177,3 +235,5 @@ export function useAuth() {
   if (!ctx) throw new Error("useAuth must be used inside AuthProvider");
   return ctx;
 }
+
+

@@ -1,9 +1,10 @@
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useStore } from "@/lib/store";
 import { UserMenu } from "@/components/shop/UserMenu";
+import { NotificationBell } from "@/components/shop/NotificationBell";
 
 export function Header({
   query,
@@ -13,6 +14,7 @@ export function Header({
   onQueryChange?: (v: string) => void;
 }) {
   const { cartCount, wishlist, setCartOpen } = useStore();
+  const navigate = useNavigate();
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/95">
@@ -30,17 +32,17 @@ export function Header({
             <Input
               value={query ?? ""}
               onChange={(e) => onQueryChange?.(e.target.value)}
-              placeholder="Search products, categories, brands…"
+              placeholder="Search products or categories…"
               className="h-10 rounded-xl border-border bg-glass pl-10 font-body"
             />
           </div>
         </div>
 
         <div className="flex shrink-0 items-center gap-1.5 max-md:hidden sm:gap-2">
-          <Button variant="glass" size="icon" className="relative rounded-xl max-md:hidden" aria-label="Wishlist">
+          <Button variant="glass" size="icon" className="relative rounded-xl max-md:hidden" aria-label="Wishlist" onClick={() => navigate({ to: "/wishlist" })}>
             <i className="bx bx-heart text-xl" />
             {wishlist.length > 0 && (
-              <Badge className="absolute -right-1.5 -top-1.5 h-5 min-w-5 justify-center rounded-full bg-accent px-1 text-[10px] text-accent-foreground">
+              <Badge key={wishlist.length} className="absolute -right-1.5 -top-1.5 h-5 min-w-5 animate-in zoom-in-50 duration-200 justify-center rounded-full bg-accent px-1 text-[10px] text-accent-foreground">
                 {wishlist.length}
               </Badge>
             )}
@@ -54,11 +56,15 @@ export function Header({
           >
             <i className="bx bx-shopping-bag text-xl" />
             {cartCount > 0 && (
-              <Badge className="absolute -right-1.5 -top-1.5 h-5 min-w-5 justify-center rounded-full px-1 text-[10px]">
+              <Badge key={cartCount} className="absolute -right-1.5 -top-1.5 h-5 min-w-5 justify-center rounded-full px-1 text-[10px] animate-in zoom-in-50 duration-200">
                 {cartCount}
               </Badge>
             )}
           </Button>
+          <Button variant="glass" size="icon" className="relative rounded-xl max-md:hidden" aria-label="My orders" onClick={() => navigate({ to: "/orders" })}>
+            <i className="bx bx-receipt text-xl" />
+          </Button>
+          <NotificationBell />
           <UserMenu variant="header" />
         </div>
       </div>

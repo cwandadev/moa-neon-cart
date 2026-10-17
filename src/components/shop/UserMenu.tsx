@@ -3,12 +3,14 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
+import { useNotifications } from "@/lib/notifications";
 
 const item =
   "flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left font-body text-sm transition-colors hover:bg-secondary";
 
 export function UserMenu({ variant, className }: { variant: "header" | "nav"; className?: string }) {
-  const { user, isAdmin, logOut } = useAuth();
+  const { user, isStaff, logOut } = useAuth();
+  const { unread } = useNotifications();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -50,6 +52,7 @@ export function UserMenu({ variant, className }: { variant: "header" | "nav"; cl
           className={cn(className, user && "text-primary")}
         >
           <i className="bx bx-user text-2xl" />
+          {user && unread > 0 && <span className="absolute right-0 top-0 size-2.5 rounded-full bg-destructive" />}
         </button>
       )}
 
@@ -67,7 +70,21 @@ export function UserMenu({ variant, className }: { variant: "header" | "nav"; cl
             <p className="truncate font-body text-xs text-muted-foreground">{user.email}</p>
           </div>
           <div className="my-1 h-px bg-border" />
-          {isAdmin && (
+          <Link to="/account" onClick={() => setOpen(false)} className={item}>
+            <i className="bx bx-user-circle text-lg" /> Account
+          </Link>
+          <Link to="/orders" onClick={() => setOpen(false)} className={item}>
+            <i className="bx bx-receipt text-lg" /> My orders
+          </Link>
+          <Link to="/notifications" onClick={() => setOpen(false)} className={item}>
+            <i className="bx bx-bell text-lg" /> Notifications
+            {unread > 0 && (
+              <span className="ml-auto rounded-full bg-destructive px-1.5 text-[10px] font-semibold text-white">
+                {unread > 9 ? "9+" : unread}
+              </span>
+            )}
+          </Link>
+          {isStaff && (
             <Link to="/admin" onClick={() => setOpen(false)} className={item}>
               <i className="bx bx-grid-alt text-lg" /> Admin
             </Link>

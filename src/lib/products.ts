@@ -159,7 +159,7 @@ export const PRODUCTS: Product[] = seeds.map(([name, category, price, photos], i
     ],
     care: "Wipe with a dry microfibre cloth. Avoid prolonged exposure to moisture and direct heat. Store in the supplied packaging when unused.",
     shipping:
-      "Orders confirmed on WhatsApp before 4pm are dispatched the same day within Kigali. Upcountry deliveries arrive in 1-3 working days through our courier partners.",
+      "Orders confirmed before 4pm are dispatched the same day within Kigali. Upcountry deliveries arrive in 1-3 working days through our courier partners.",
     references: [
       { label: "Full manufacturer spec sheet", url: "https://example.com/spec-sheet" },
       { label: "Care & maintenance guide", url: "https://example.com/care-guide" },
@@ -221,4 +221,4 @@ export const stockLabel = (p: Product) =>
       : { text: "In Stock", tone: "in" as const };
 
 export const money = (n: number) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
+  `${Math.round(n).toLocaleString("en-US")} RWF`;

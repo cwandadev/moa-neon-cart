@@ -1,16 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, type ChangeEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ChangeEvent, type ReactNode } from "react";
 import { z } from "zod";
-import { useStore, type AdminProduct, type ProductInput } from "@/lib/store";
-import { CATEGORIES, type Category } from "@/lib/products";
 import { PageHead, Panel } from "@/components/moa/ui";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,51 +12,84 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { useAuth } from "@/lib/auth";
+import { money } from "@/lib/products";
+import { supabase } from "@/lib/supabase";
 
 export const Route = createFileRoute("/admin/products")({
   head: () => ({
     meta: [
       { title: "Product Management — MOA Mart Suite" },
-      {
-        name: "description",
-        content: "Create, edit and delete products in the MOA Mart catalog.",
-      },
-      { property: "og:title", content: "Product Management — MOA Mart Suite" },
-      { property: "og:description", content: "Manage the MOA Mart product catalog." },
+      { name: "description", content: "Create, edit and archive products in the MOA Mart catalog." },
     ],
   }),
   component: Products,
 });
 
-const isHttp = (u: string) => /^https?:/i.test(u.trim());
+type Row = {
+  id: string;
+  name: string;
+  category_id: string;
+  price: number;
+  old_price: number | null;
+  sku: string;
+  stock: number;
+  images: string[];
+  blurb: string;
+  description: string;
+  tags: string[];
+  archived_at: string | null;
+  category: { name: string } | null;
+};
+type Cat = { id: string; name: string };
+
+const msgOf = (e: unknown) =>
+  e && typeof e === "object" && "message" in e
+    ? String((e as { message: unknown }).message)
+    : "Something went wrong. Please try again.";
+
+const slugify = (s: string) =>
+  s
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+
+const isHttp = (u: string) => /^https?:\/\//i.test(u.trim());
 
 const schema = z
   .object({
-    name: z
-      .string()
-      .trim()
-      .min(2, "Name must be at least 2 characters")
-      .max(80, "Name is too long (80 max)"),
-    category: z.string().refine((v) => (CATEGORIES as string[]).includes(v), "Pick a category"),
+    name: z.string().trim().min(2, "Name must be at least 2 characters").max(80, "Name is too long (80 max)"),
+    categoryId: z.string().min(1, "Pick a category"),
     price: z
       .number({ required_error: "Price is required", invalid_type_error: "Enter a valid price" })
+      .int("Use whole RWF, no decimals")
       .positive("Price must be greater than 0")
-      .max(1000000, "Price is too high"),
+      .max(100000000, "Price is too high"),
     oldPrice: z
       .number({ invalid_type_error: "Enter a valid price" })
+      .int("Use whole RWF, no decimals")
       .positive("Must be greater than 0")
       .optional(),
+    cost: z
+      .number({ required_error: "Cost is required", invalid_type_error: "Enter a valid cost" })
+      .int("Use whole RWF, no decimals")
+      .min(0, "Cost cannot be negative")
+      .max(100000000, "Cost is too high"),
     stock: z
       .number({ required_error: "Stock is required", invalid_type_error: "Enter a valid number" })
       .int("Stock must be a whole number")
       .min(0, "Stock cannot be negative")
       .max(100000, "Stock is too high"),
-    image: z
-      .string()
-      .trim()
-      .min(1, "Image URL is required")
-      .url("Enter a valid URL")
-      .refine(isHttp, "URL must start with http:// or https://"),
+    images: z.array(z.string()).min(1, "Add at least one photo").max(6, "Up to 6 photos"),
     blurb: z.string().trim().max(160, "Keep the short description under 160 characters"),
     description: z.string().trim().max(1000, "Description is too long (1000 max)"),
     tags: z.array(z.string().max(30, "Each tag must be under 30 characters")).max(8, "Up to 8 tags"),
@@ -77,70 +101,32 @@ const schema = z
 
 type Form = {
   name: string;
-  category: string;
+  categoryId: string;
   price: string;
   oldPrice: string;
+  cost: string;
   stock: string;
-  image: string;
+  images: string[];
   blurb: string;
   description: string;
   tags: string;
 };
-type Errors = Partial<Record<keyof Form, string>>;
+type Errors = Partial<Record<keyof Form, string | undefined>>;
 
-const toForm = (p?: AdminProduct): Form => ({
+const num = (v: string) => (v.trim() === "" ? undefined : Number(v.replace(/[,\s]/g, "")));
+
+const toForm = (cats: Cat[], p?: Row, cost?: number): Form => ({
   name: p?.name ?? "",
-  category: p?.category ?? CATEGORIES[0] ?? "",
+  categoryId: p?.category_id ?? cats[0]?.id ?? "",
   price: p ? String(p.price) : "",
-  oldPrice: p?.oldPrice ? String(p.oldPrice) : "",
+  oldPrice: p?.old_price ? String(p.old_price) : "",
+  cost: cost !== undefined ? String(cost) : "",
   stock: p ? String(p.stock) : "0",
-  image: p?.images[0] ?? "",
+  images: p?.images ?? [],
   blurb: p?.blurb ?? "",
   description: p?.description ?? "",
   tags: p?.tags.join(", ") ?? "",
 });
-
-const num = (v: string) => (v.trim() === "" ? undefined : Number(v));
-
-function validate(f: Form, existing?: AdminProduct): { errors: Errors; input?: ProductInput } {
-  const r = schema.safeParse({
-    name: f.name,
-    category: f.category,
-    price: num(f.price),
-    oldPrice: num(f.oldPrice),
-    stock: num(f.stock),
-    image: f.image,
-    blurb: f.blurb,
-    description: f.description,
-    tags: f.tags
-      .split(",")
-      .map((t) => t.trim())
-      .filter(Boolean),
-  });
-  if (!r.success) {
-    const errors: Errors = {};
-    for (const i of r.error.issues) {
-      const k = i.path[0] as keyof Form;
-      errors[k] ??= i.message;
-    }
-    return { errors };
-  }
-  const d = r.data;
-  return {
-    errors: {},
-    input: {
-      name: d.name,
-      category: d.category as Category,
-      price: d.price,
-      oldPrice: d.oldPrice,
-      stock: d.stock,
-      images: [d.image, ...(existing?.images.slice(1) ?? [])],
-      blurb: d.blurb,
-      description: d.description,
-      tags: d.tags,
-    },
-  };
-}
 
 const stockState = (n: number) =>
   n <= 0
@@ -152,15 +138,7 @@ const stockState = (n: number) =>
 const fieldClass =
   "w-full rounded-xl border border-[#262626] bg-background px-3 text-sm text-foreground outline-none focus:border-foreground/50";
 
-function Field({
-  label,
-  error,
-  children,
-}: {
-  label: string;
-  error?: string | undefined;
-  children: ReactNode;
-}) {
+function Field({ label, error, children }: { label: string; error?: string | undefined; children: ReactNode }) {
   return (
     <label className="grid gap-1.5 text-xs text-muted-foreground">
       <span>{label}</span>
@@ -170,23 +148,166 @@ function Field({
   );
 }
 
-function ProductDialog({ product, onClose }: { product?: AdminProduct | undefined; onClose: () => void }) {
-  const { addProduct, updateProduct } = useStore();
-  const [form, setForm] = useState<Form>(() => toForm(product));
+async function uploadImage(file: File, folder: string): Promise<string> {
+  const ext = (file.name.split(".").pop() ?? "jpg").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 5) || "jpg";
+  const path = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const { error } = await supabase.storage
+    .from("product-images")
+    .upload(path, file, { contentType: file.type, upsert: false });
+  if (error) throw new Error(error.message);
+  return supabase.storage.from("product-images").getPublicUrl(path).data.publicUrl;
+}
+
+function ProductDialog({
+  product,
+  cats,
+  rows,
+  costs,
+  onClose,
+  onSaved,
+}: {
+  product?: Row | undefined;
+  cats: Cat[];
+  rows: Row[];
+  costs: Record<string, number>;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const { user } = useAuth();
+  const [form, setForm] = useState<Form>(() => toForm(cats, product, product ? costs[product.id] : undefined));
   const [errors, setErrors] = useState<Errors>({});
+  const [formError, setFormError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [urlInput, setUrlInput] = useState("");
 
   const set =
     (k: keyof Form) =>
     (e: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
       setForm({ ...form, [k]: e.target.value });
 
-  const submit = () => {
-    const { errors: e, input } = validate(form, product);
-    setErrors(e);
-    if (!input) return;
-    if (product) updateProduct(product.id, input);
-    else addProduct(input);
-    onClose();
+  const onFile = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setErrors((er) => ({ ...er, images: "Use a JPG, PNG or WebP photo." }));
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setErrors((er) => ({ ...er, images: "That photo is larger than 5 MB." }));
+      return;
+    }
+    setUploading(true);
+    try {
+      const url = await uploadImage(file, slugify(form.name) || "new");
+      setForm((f) => ({ ...f, images: [...f.images, url] }));
+      setErrors((er) => ({ ...er, images: undefined }));
+    } catch (err) {
+      setErrors((er) => ({ ...er, images: msgOf(err) }));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const addUrl = () => {
+    const u = urlInput.trim();
+    if (!isHttp(u)) {
+      setErrors((er) => ({ ...er, images: "Enter a link that starts with https://" }));
+      return;
+    }
+    if (form.images.length >= 6) {
+      setErrors((er) => ({ ...er, images: "Up to 6 photos" }));
+      return;
+    }
+    setForm((f) => ({ ...f, images: [...f.images, u] }));
+    setUrlInput("");
+    setErrors((er) => ({ ...er, images: undefined }));
+  };
+
+  const removeImage = (i: number) => setForm((f) => ({ ...f, images: f.images.filter((_, j) => j !== i) }));
+
+  const submit = async () => {
+    const r = schema.safeParse({
+      name: form.name,
+      categoryId: form.categoryId,
+      price: num(form.price),
+      oldPrice: num(form.oldPrice),
+      cost: num(form.cost),
+      stock: num(form.stock),
+      images: form.images,
+      blurb: form.blurb,
+      description: form.description,
+      tags: form.tags
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean),
+    });
+    if (!r.success) {
+      const errs: Errors = {};
+      for (const i of r.error.issues) {
+        const k = i.path[0] as keyof Form;
+        errs[k] ??= i.message;
+      }
+      setErrors(errs);
+      return;
+    }
+    setErrors({});
+    const d = r.data;
+    setSaving(true);
+    setFormError("");
+    try {
+      let id = product?.id ?? "";
+      if (product) {
+        const { error } = await supabase
+          .from("products")
+          .update({
+            name: d.name,
+            category_id: d.categoryId,
+            price: d.price,
+            old_price: d.oldPrice ?? null,
+            images: d.images,
+            blurb: d.blurb,
+            description: d.description,
+            tags: d.tags,
+          })
+          .eq("id", product.id);
+        if (error) throw error;
+      } else {
+        const taken = new Set(rows.map((x) => x.id));
+        const base = slugify(d.name) || "product";
+        id = base;
+        for (let n = 2; taken.has(id); n++) id = `${base}-${n}`;
+        const nums = rows.map((x) => Number(x.sku.split("-").pop())).filter((n) => Number.isFinite(n));
+        const next = (nums.length ? Math.max(...nums) : 1000) + 1;
+        const catName = cats.find((c) => c.id === d.categoryId)?.name ?? "";
+        const code = catName.replace(/[^A-Za-z]/g, "").slice(0, 2).toUpperCase() || "XX";
+        const { error } = await supabase.from("products").insert({
+          id,
+          name: d.name,
+          category_id: d.categoryId,
+          price: d.price,
+          old_price: d.oldPrice ?? null,
+          sku: `MOA-${code}-${next}`,
+          stock: d.stock,
+          images: d.images,
+          blurb: d.blurb,
+          description: d.description,
+          tags: d.tags,
+        });
+        if (error) throw error;
+      }
+      const { error: costErr } = await supabase
+        .from("product_costs")
+        .upsert({ product_id: id, cost: d.cost, updated_by: user?.id ?? null, updated_at: new Date().toISOString() });
+      if (costErr) throw costErr;
+      onSaved();
+      onClose();
+    } catch (err) {
+      setFormError(msgOf(err));
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -200,7 +321,9 @@ function ProductDialog({ product, onClose }: { product?: AdminProduct | undefine
         <DialogHeader>
           <DialogTitle>{product ? "Edit product" : "Add product"}</DialogTitle>
           <DialogDescription>
-            {product ? `Editing ${product.sku}` : "A SKU is generated automatically."}
+            {product
+              ? `Editing ${product.sku}. Change stock on the Live Inventory page.`
+              : "The SKU and web address are generated automatically."}
           </DialogDescription>
         </DialogHeader>
 
@@ -209,44 +332,83 @@ function ProductDialog({ product, onClose }: { product?: AdminProduct | undefine
             <input value={form.name} onChange={set("name")} className={`${fieldClass} h-10`} placeholder="Vector Runner V3" />
           </Field>
 
-          <Field label="Category" error={errors.category}>
-            <select value={form.category} onChange={set("category")} className={`${fieldClass} h-10`}>
-              {CATEGORIES.map((c) => (
-                <option key={c} value={c} className="bg-card">
-                  {c}
+          <Field label="Category" error={errors.categoryId}>
+            <select value={form.categoryId} onChange={set("categoryId")} className={`${fieldClass} h-10`}>
+              {cats.map((c) => (
+                <option key={c.id} value={c.id} className="bg-card">
+                  {c.name}
                 </option>
               ))}
             </select>
           </Field>
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <Field label="Price ($)" error={errors.price}>
-              <input value={form.price} onChange={set("price")} inputMode="decimal" className={`${fieldClass} h-10`} />
+            <Field label="Price (RWF)" error={errors.price}>
+              <input value={form.price} onChange={set("price")} inputMode="numeric" className={`${fieldClass} h-10`} />
             </Field>
-            <Field label="Old price (optional)" error={errors.oldPrice}>
-              <input value={form.oldPrice} onChange={set("oldPrice")} inputMode="decimal" className={`${fieldClass} h-10`} />
+            <Field label="Old price (RWF, optional)" error={errors.oldPrice}>
+              <input value={form.oldPrice} onChange={set("oldPrice")} inputMode="numeric" className={`${fieldClass} h-10`} />
             </Field>
-            <Field label="Stock" error={errors.stock}>
-              <input value={form.stock} onChange={set("stock")} inputMode="numeric" className={`${fieldClass} h-10`} />
+            <Field label="Cost per unit (RWF)" error={errors.cost}>
+              <input value={form.cost} onChange={set("cost")} inputMode="numeric" className={`${fieldClass} h-10`} />
             </Field>
           </div>
+          <p className="-mt-2 text-[11px] text-muted-foreground">The cost is only visible to admins and is used for finance.</p>
 
-          <Field label="Image URL" error={errors.image}>
-            <div className="flex items-center gap-3">
-              <input value={form.image} onChange={set("image")} className={`${fieldClass} h-10`} placeholder="https://..." />
-              {isHttp(form.image) && (
-                <img
-                  key={form.image}
-                  src={form.image}
-                  alt=""
-                  className="size-10 shrink-0 rounded-lg object-cover"
-                  onError={(e) => {
-                    e.currentTarget.style.display = "none";
-                  }}
-                />
-              )}
+          {!product && (
+            <Field label="Starting stock" error={errors.stock}>
+              <input value={form.stock} onChange={set("stock")} inputMode="numeric" className={`${fieldClass} h-10`} />
+            </Field>
+          )}
+
+          <div className="grid gap-2 text-xs text-muted-foreground">
+            <span>Photos (the first one is the main photo)</span>
+            <div className="flex flex-wrap gap-2">
+              {form.images.map((u, i) => (
+                <div key={`${i}-${u}`} className="relative">
+                  <img src={u} alt="" className="size-16 rounded-lg object-cover" />
+                  <button
+                    type="button"
+                    aria-label="Remove photo"
+                    onClick={() => removeImage(i)}
+                    className="absolute -right-1.5 -top-1.5 grid size-5 place-items-center rounded-full bg-destructive text-[11px] text-white"
+                  >
+                    ×
+                  </button>
+                  {i === 0 && (
+                    <span className="absolute bottom-0 left-0 rounded-tr-md bg-primary px-1 text-[9px] text-primary-foreground">
+                      Main
+                    </span>
+                  )}
+                </div>
+              ))}
             </div>
-          </Field>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="hairline cursor-pointer rounded-xl px-3 py-2 text-xs text-foreground hover:text-primary">
+                {uploading ? "Uploading…" : "Upload photo"}
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  disabled={uploading || form.images.length >= 6}
+                  onChange={(e) => void onFile(e)}
+                />
+              </label>
+              <span className="text-[11px]">JPG, PNG or WebP, up to 5 MB, max 6 photos</span>
+            </div>
+            <div className="flex gap-2">
+              <input
+                value={urlInput}
+                onChange={(e) => setUrlInput(e.target.value)}
+                placeholder="Or paste a photo link (https://...)"
+                className={`${fieldClass} h-9 text-xs`}
+              />
+              <button type="button" onClick={addUrl} className="hairline h-9 shrink-0 rounded-xl px-3 text-xs text-foreground">
+                Add
+              </button>
+            </div>
+            {errors.images && <span className="text-[11px] text-red-400">{errors.images}</span>}
+          </div>
 
           <Field label="Short description (optional)" error={errors.blurb}>
             <input value={form.blurb} onChange={set("blurb")} className={`${fieldClass} h-10`} />
@@ -261,6 +423,8 @@ function ProductDialog({ product, onClose }: { product?: AdminProduct | undefine
           </Field>
         </div>
 
+        {formError && <p className="text-sm text-destructive">{formError}</p>}
+
         <div className="mt-2 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button
             type="button"
@@ -271,10 +435,11 @@ function ProductDialog({ product, onClose }: { product?: AdminProduct | undefine
           </button>
           <button
             type="button"
-            onClick={submit}
-            className="h-10 rounded-xl bg-primary px-5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+            disabled={saving || uploading}
+            onClick={() => void submit()}
+            className="h-10 rounded-xl bg-primary px-5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
           >
-            {product ? "Save changes" : "Create product"}
+            {saving ? "Saving…" : product ? "Save changes" : "Create product"}
           </button>
         </div>
       </DialogContent>
@@ -282,7 +447,17 @@ function ProductDialog({ product, onClose }: { product?: AdminProduct | undefine
   );
 }
 
-function RowActions({ name, onEdit, onDelete }: { name: string; onEdit: () => void; onDelete: () => void }) {
+function RowActions({
+  name,
+  archived,
+  onEdit,
+  onToggle,
+}: {
+  name: string;
+  archived: boolean;
+  onEdit: () => void;
+  onToggle: () => void;
+}) {
   const btn =
     "grid size-9 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground";
   return (
@@ -290,37 +465,93 @@ function RowActions({ name, onEdit, onDelete }: { name: string; onEdit: () => vo
       <button type="button" aria-label={`Edit ${name}`} onClick={onEdit} className={btn}>
         <i className="bx bx-edit text-lg" />
       </button>
-      <button type="button" aria-label={`Delete ${name}`} onClick={onDelete} className={btn}>
-        <i className="bx bx-trash text-lg" />
+      <button
+        type="button"
+        aria-label={`${archived ? "Restore" : "Archive"} ${name}`}
+        onClick={onToggle}
+        className={btn}
+      >
+        <i className={`bx ${archived ? "bx-archive-out" : "bx-archive"} text-lg`} />
       </button>
     </div>
   );
 }
 
-type Confirm = { type: "delete"; product: AdminProduct } | { type: "reset" } | null;
-
 function Products() {
-  const { products, deleteProduct, resetProducts } = useStore();
+  const { isAdmin } = useAuth();
+  const [rows, setRows] = useState<Row[]>([]);
+  const [cats, setCats] = useState<Cat[]>([]);
+  const [costs, setCosts] = useState<Record<string, number>>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [q, setQ] = useState("");
   const [cat, setCat] = useState("All");
+  const [view, setView] = useState<"active" | "archived" | "all">("active");
   const [visible, setVisible] = useState(20);
-  const [dialog, setDialog] = useState<{ product?: AdminProduct | undefined } | null>(null);
-  const [confirm, setConfirm] = useState<Confirm>(null);
+  const [dialog, setDialog] = useState<{ product?: Row | undefined } | null>(null);
+  const [confirm, setConfirm] = useState<Row | null>(null);
 
-  const rows = products.filter((p) => {
+  const load = useCallback(async () => {
+    try {
+      const [p, c, k] = await Promise.all([
+        supabase
+          .from("products")
+          .select(
+            "id, name, category_id, price, old_price, sku, stock, images, blurb, description, tags, archived_at, category:categories(name)",
+          )
+          .order("created_at", { ascending: false })
+          .limit(500),
+        supabase.from("categories").select("id, name").order("sort_order"),
+        supabase.from("product_costs").select("product_id, cost"),
+      ]);
+      if (p.error) throw p.error;
+      if (c.error) throw c.error;
+      setRows((p.data ?? []) as unknown as Row[]);
+      setCats((c.data ?? []) as Cat[]);
+      const map: Record<string, number> = {};
+      for (const r of k.data ?? []) map[r.product_id as string] = r.cost as number;
+      setCosts(map);
+      setError("");
+    } catch {
+      setError("Could not load products. Check your connection and refresh.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const setArchived = async (p: Row, archived: boolean) => {
+    setError("");
+    const { error: err } = await supabase
+      .from("products")
+      .update({ archived_at: archived ? new Date().toISOString() : null })
+      .eq("id", p.id);
+    if (err) {
+      setError(err.message);
+      return;
+    }
+    void load();
+  };
+
+  const filtered = rows.filter((p) => {
     const t = q.trim().toLowerCase();
+    const catName = p.category?.name ?? "";
     return (
-      (cat === "All" || p.category === cat) &&
-      (!t || `${p.name} ${p.sku} ${p.category}`.toLowerCase().includes(t))
+      (view === "all" || (view === "archived") === Boolean(p.archived_at)) &&
+      (cat === "All" || catName === cat) &&
+      (!t || `${p.name} ${p.sku} ${catName}`.toLowerCase().includes(t))
     );
   });
-  const shown = rows.slice(0, visible);
+  const shown = filtered.slice(0, visible);
 
   return (
     <>
       <PageHead
         title="Product Management"
-        subtitle="Create, edit and remove products. Changes are saved in this browser until the backend is connected."
+        subtitle="Create, edit and archive products. Changes go live on the storefront right away."
       />
 
       <div className="mb-5 flex flex-wrap gap-3">
@@ -344,29 +575,41 @@ function Products() {
           }}
           className="hairline h-10 rounded-xl bg-card/60 px-3 text-sm outline-none"
         >
-          {["All", ...CATEGORIES].map((c) => (
+          {["All", ...cats.map((c) => c.name)].map((c) => (
             <option key={c} value={c} className="bg-card">
               {c}
             </option>
           ))}
         </select>
-        <button
-          type="button"
-          onClick={() => setDialog({})}
-          className="flex h-10 items-center gap-2 rounded-xl bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+        <select
+          value={view}
+          onChange={(e) => {
+            setView(e.target.value as "active" | "archived" | "all");
+            setVisible(20);
+          }}
+          className="hairline h-10 rounded-xl bg-card/60 px-3 text-sm outline-none"
         >
-          <i className="bx bx-plus text-lg" /> Add product
-        </button>
-        <button
-          type="button"
-          onClick={() => setConfirm({ type: "reset" })}
-          className="hairline h-10 rounded-xl px-4 text-xs text-muted-foreground transition-colors hover:text-foreground"
-        >
-          Reset demo data
-        </button>
+          <option value="active" className="bg-card">Active</option>
+          <option value="archived" className="bg-card">Archived</option>
+          <option value="all" className="bg-card">All</option>
+        </select>
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => setDialog({})}
+            className="flex h-10 items-center gap-2 rounded-xl bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+          >
+            <i className="bx bx-plus text-lg" /> Add product
+          </button>
+        )}
       </div>
 
-      {rows.length === 0 ? (
+      {!isAdmin && (
+        <p className="mb-4 text-xs text-muted-foreground">Only admins can add, edit or archive products.</p>
+      )}
+      {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
+
+      {!loading && filtered.length === 0 ? (
         <Panel>
           <p className="py-8 text-center text-sm text-muted-foreground">No products match your search.</p>
         </Panel>
@@ -382,7 +625,7 @@ function Products() {
                   <th className="p-4">Price</th>
                   <th className="p-4">Stock</th>
                   <th className="p-4">Status</th>
-                  <th className="p-4 text-right">Actions</th>
+                  {isAdmin && <th className="p-4 text-right">Actions</th>}
                 </tr>
               </thead>
               <tbody>
@@ -392,24 +635,29 @@ function Products() {
                     <tr key={p.id} className="border-b border-[#262626]/60 transition-colors hover:bg-secondary/30">
                       <td className="p-4">
                         <div className="flex items-center gap-3">
-                          <img src={p.images[0]} alt={p.name} className="size-11 rounded-lg object-cover" />
+                          {p.images[0] && <img src={p.images[0]} alt={p.name} className="size-11 rounded-lg object-cover" />}
                           <span className="text-xs">{p.name}</span>
                         </div>
                       </td>
                       <td className="p-4 text-xs text-muted-foreground">{p.sku}</td>
-                      <td className="p-4 text-xs text-muted-foreground">{p.category}</td>
-                      <td className="p-4 text-xs text-primary">${p.price}</td>
+                      <td className="p-4 text-xs text-muted-foreground">{p.category?.name ?? "—"}</td>
+                      <td className="p-4 text-xs text-primary">{money(p.price)}</td>
                       <td className="p-4 text-xs">{p.stock}</td>
-                      <td className={`p-4 text-[11px] ${s.cls}`}>{s.label}</td>
-                      <td className="p-4">
-                        <div className="flex justify-end">
-                          <RowActions
-                            name={p.name}
-                            onEdit={() => setDialog({ product: p })}
-                            onDelete={() => setConfirm({ type: "delete", product: p })}
-                          />
-                        </div>
+                      <td className={`p-4 text-[11px] ${p.archived_at ? "text-muted-foreground" : s.cls}`}>
+                        {p.archived_at ? "Archived" : s.label}
                       </td>
+                      {isAdmin && (
+                        <td className="p-4">
+                          <div className="flex justify-end">
+                            <RowActions
+                              name={p.name}
+                              archived={Boolean(p.archived_at)}
+                              onEdit={() => setDialog({ product: p })}
+                              onToggle={() => (p.archived_at ? void setArchived(p, false) : setConfirm(p))}
+                            />
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
@@ -423,24 +671,27 @@ function Products() {
               return (
                 <div key={p.id} className="glass rounded-2xl p-4">
                   <div className="flex gap-3">
-                    <img src={p.images[0]} alt={p.name} className="size-16 shrink-0 rounded-xl object-cover" />
+                    {p.images[0] && <img src={p.images[0]} alt={p.name} className="size-16 shrink-0 rounded-xl object-cover" />}
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm">{p.name}</p>
                       <p className="mt-0.5 text-[11px] text-muted-foreground">
-                        {p.sku} · {p.category}
+                        {p.sku} · {p.category?.name ?? "—"}
                       </p>
-                      <p className="mt-1 text-sm text-primary">${p.price}</p>
+                      <p className="mt-1 text-sm text-primary">{money(p.price)}</p>
                     </div>
                   </div>
                   <div className="mt-3 flex items-center justify-between">
-                    <span className={`text-[11px] ${s.cls}`}>
-                      {s.label} · {p.stock}
+                    <span className={`text-[11px] ${p.archived_at ? "text-muted-foreground" : s.cls}`}>
+                      {p.archived_at ? "Archived" : `${s.label} · ${p.stock}`}
                     </span>
-                    <RowActions
-                      name={p.name}
-                      onEdit={() => setDialog({ product: p })}
-                      onDelete={() => setConfirm({ type: "delete", product: p })}
-                    />
+                    {isAdmin && (
+                      <RowActions
+                        name={p.name}
+                        archived={Boolean(p.archived_at)}
+                        onEdit={() => setDialog({ product: p })}
+                        onToggle={() => (p.archived_at ? void setArchived(p, false) : setConfirm(p))}
+                      />
+                    )}
                   </div>
                 </div>
               );
@@ -449,9 +700,9 @@ function Products() {
 
           <div className="mt-4 flex items-center justify-between gap-3 text-xs text-muted-foreground md:mb-20">
             <span>
-              Showing {shown.length} of {rows.length} products
+              Showing {shown.length} of {filtered.length} products
             </span>
-            {rows.length > visible && (
+            {filtered.length > visible && (
               <button
                 type="button"
                 onClick={() => setVisible(visible + 20)}
@@ -468,7 +719,11 @@ function Products() {
         <ProductDialog
           key={dialog.product?.id ?? "new"}
           product={dialog.product}
+          cats={cats}
+          rows={rows}
+          costs={costs}
           onClose={() => setDialog(null)}
+          onSaved={() => void load()}
         />
       )}
 
@@ -480,24 +735,19 @@ function Products() {
       >
         <AlertDialogContent className="moa-admin-dialog rounded-2xl border-[#262626]">
           <AlertDialogHeader>
-            <AlertDialogTitle>
-              {confirm?.type === "delete" ? "Delete this product?" : "Reset demo data?"}
-            </AlertDialogTitle>
+            <AlertDialogTitle>Archive this product?</AlertDialogTitle>
             <AlertDialogDescription>
-              {confirm?.type === "delete"
-                ? `"${confirm.product.name}" will be removed from the admin and the storefront. This cannot be undone.`
-                : "All products return to the 52 mock products. Anything you added, edited or deleted is lost."}
+              {confirm ? `"${confirm.name}" will disappear from the storefront. Past orders and stock history stay. You can restore it any time.` : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
-                if (confirm?.type === "delete") deleteProduct(confirm.product.id);
-                else if (confirm?.type === "reset") resetProducts();
+                if (confirm) void setArchived(confirm, true);
               }}
             >
-              {confirm?.type === "delete" ? "Delete" : "Reset"}
+              Archive
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

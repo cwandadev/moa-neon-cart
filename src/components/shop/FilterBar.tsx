@@ -16,7 +16,7 @@ export type Filters = {
 
 export const defaultFilters: Filters = {
   categories: [],
-  price: [0, 1500],
+  price: [0, 2_000_000],
   inStockOnly: false,
   minRating: 0,
   sort: "smart",
@@ -36,12 +36,16 @@ export function FilterBar({
   filters,
   onChange,
   resultCount,
+  maxPrice = 2_000_000,
+  categories = CATEGORIES,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   filters: Filters;
   onChange: (f: Filters) => void;
   resultCount: number;
+  maxPrice?: number;
+  categories?: string[];
 }) {
   const toggleCategory = (c: Category) =>
     onChange({
@@ -55,7 +59,7 @@ export function FilterBar({
     filters.categories.length +
     (filters.inStockOnly ? 1 : 0) +
     (filters.minRating > 0 ? 1 : 0) +
-    (filters.price[0] > 0 || filters.price[1] < 1500 ? 1 : 0);
+    (filters.price[0] > 0 || filters.price[1] < maxPrice ? 1 : 0);
 
   return (
     <Collapsible open={open} onOpenChange={onOpenChange}>
@@ -98,13 +102,13 @@ export function FilterBar({
               Category
             </p>
             <div className="flex flex-wrap gap-2">
-              {CATEGORIES.map((c) => (
+              {categories.map((c) => (
                 <button
                   key={c}
-                  onClick={() => toggleCategory(c)}
+                  onClick={() => toggleCategory(c as Category)}
                   className={cn(
                     "rounded-full border px-3 py-1.5 font-body text-xs transition-colors",
-                    filters.categories.includes(c)
+                    filters.categories.includes(c as Category)
                       ? "border-accent/50 bg-accent/15 text-accent"
                       : "border-border text-muted-foreground hover:text-foreground",
                   )}
@@ -122,9 +126,9 @@ export function FilterBar({
             <Slider
               value={filters.price}
               min={0}
-              max={1500}
-              step={10}
-              onValueChange={(v) => onChange({ ...filters, price: [v[0] ?? 0, v[1] ?? 1500] })}
+              max={maxPrice}
+              step={5000}
+              onValueChange={(v) => onChange({ ...filters, price: [v[0] ?? 0, v[1] ?? maxPrice] })}
             />
             <p className="mt-3 font-body text-xs text-muted-foreground">
               {money(filters.price[0])} — {money(filters.price[1])}

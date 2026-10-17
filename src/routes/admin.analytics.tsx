@@ -1,178 +1,282 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Area,
   AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
-  Cell,
-  Legend,
-  Line,
-  LineChart,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
-import { PageHead, Panel } from "@/components/moa/ui";
+import { Kpi, PageHead, Panel } from "@/components/moa/ui";
+import { money } from "@/lib/products";
+import { supabase } from "@/lib/supabase";
 
 export const Route = createFileRoute("/admin/analytics")({
   head: () => ({
     meta: [
-      { title: "Analytics Center — MOA Mart Suite" },
-      {
-        name: "description",
-        content: "Sales trends, traffic sources and customer sentiment analytics for MOA Mart.",
-      },
-      { property: "og:title", content: "Analytics Center — MOA Mart Suite" },
-      { property: "og:description", content: "Interactive charts across daily, weekly, monthly and YTD ranges." },
+      { title: "Analytics — MOA Mart Suite" },
+      { name: "description", content: "Orders, order value and top products from real storefront orders." },
     ],
   }),
   component: Analytics,
 });
 
-const RANGES = ["Daily", "Weekly", "Monthly", "YTD"] as const;
+type Range = 7 | 30 | 90;
+const RANGES: Range[] = [7, 30, 90];
 
-const DATASETS: Record<string, { label: string; sales: number; visits: number }[]> = {
-  Daily: ["00h", "04h", "08h", "12h", "16h", "20h"].map((label, i) => ({
-    label,
-    sales: [420, 260, 980, 1450, 1720, 1240][i]!,
-    visits: [120, 90, 340, 520, 610, 430][i]!,
-  })),
-  Weekly: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((label, i) => ({
-    label,
-    sales: [5200, 6100, 5800, 7400, 9100, 12400, 8600][i]!,
-    visits: [1800, 2100, 1950, 2400, 3200, 4100, 3000][i]!,
-  })),
-  Monthly: ["W1", "W2", "W3", "W4"].map((label, i) => ({
-    label,
-    sales: [24000, 28500, 31200, 36800][i]!,
-    visits: [9800, 11200, 12500, 14100][i]!,
-  })),
-  YTD: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug"].map((label, i) => ({
-    label,
-    sales: [82000, 76000, 91000, 104000, 98000, 118000, 132000, 121000][i]!,
-    visits: [31000, 29000, 34000, 39000, 37000, 44000, 49000, 46000][i]!,
-  })),
+const FULFILMENT_LABELS: Record<string, string> = {
+  pending: "Pending",
+  confirmed: "Confirmed",
+  out_for_delivery: "Out for delivery",
+  delivered: "Delivered",
+  cancelled: "Cancelled",
 };
 
-const TRAFFIC = [
-  { name: "Direct", value: 38 },
-  { name: "Instagram", value: 27 },
-  { name: "WhatsApp Share", value: 21 },
-  { name: "Search", value: 14 },
-];
-
-const SENTIMENT = [
-  { label: "Delighted", value: 58 },
-  { label: "Satisfied", value: 27 },
-  { label: "Neutral", value: 10 },
-  { label: "Frustrated", value: 5 },
-];
-
-const COLORS = ["#ffffff", "#a3a3a3", "#737373", "#525252"];
-
-const tooltipStyle = {
-  background: "#0a0a0a",
-  border: "1px solid #262626",
-  borderRadius: 12,
-  fontSize: 12,
+type Item = { name: string; qty: number; price: number; products: { category: { name: string } | null } | null };
+type Order = {
+  created_at: string;
+  total: number;
+  payment_status: string;
+  fulfilment_status: string;
+  order_items: Item[];
 };
+
+const dayKey = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+const compact = (v: number) =>
+  v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : v >= 1000 ? `${Math.round(v / 1000)}k` : String(v);
+
+const tip = { background: "#0a0a0a", border: "1px solid #262626", borderRadius: 12, fontSize: 12 };
 
 function Analytics() {
-  const [range, setRange] = useState<(typeof RANGES)[number]>("Weekly");
-  const data = DATASETS[range]!;
+  const [days, setDays] = useState<Range>(30);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async (range: Range) => {
+    setLoading(true);
+    try {
+      const since = new Date(Date.now() - range * 24 * 60 * 60 * 1000).toISOString();
+      const { data, error: err } = await supabase
+        .from("orders")
+        .select(
+          "created_at, total, payment_status, fulfilment_status, order_items(name, qty, price, products(category:categories(name)))",
+        )
+        .gte("created_at", since)
+        .order("created_at", { ascending: true })
+        .limit(5000);
+      if (err) throw err;
+      setOrders((data ?? []) as unknown as Order[]);
+      setError("");
+    } catch {
+      setError("Could not load analytics. Check your connection and refresh.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load(days);
+  }, [days, load]);
+
+  const view = useMemo(() => {
+    const active = orders.filter((o) => o.fulfilment_status !== "cancelled");
+
+    const slots = new Map<string, { label: string; value: number; count: number }>();
+    const today = new Date();
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
+      slots.set(dayKey(d), {
+        label: d.toLocaleDateString("en-GB", { day: "numeric", month: "short" }),
+        value: 0,
+        count: 0,
+      });
+    }
+    for (const o of active) {
+      const s = slots.get(dayKey(new Date(o.created_at)));
+      if (s) {
+        s.value += o.total;
+        s.count += 1;
+      }
+    }
+
+    const prod = new Map<string, { qty: number; value: number }>();
+    const cat = new Map<string, number>();
+    for (const o of active) {
+      for (const it of o.order_items) {
+        const p = prod.get(it.name) ?? { qty: 0, value: 0 };
+        p.qty += it.qty;
+        p.value += it.price * it.qty;
+        prod.set(it.name, p);
+        const cn = it.products?.category?.name ?? "Other";
+        cat.set(cn, (cat.get(cn) ?? 0) + it.price * it.qty);
+      }
+    }
+
+    const totalValue = active.reduce((n, o) => n + o.total, 0);
+    return {
+      chart: [...slots.values()],
+      statusCounts: Object.entries(FULFILMENT_LABELS).map(([k, label]) => ({
+        label,
+        value: orders.filter((o) => o.fulfilment_status === k).length,
+      })),
+      top: [...prod]
+        .map(([name, v]) => ({ name, qty: v.qty, value: v.value }))
+        .sort((a, b) => b.qty - a.qty)
+        .slice(0, 8),
+      byCategory: [...cat].map(([label, value]) => ({ label: label.split(" ")[0] ?? label, value })),
+      totalValue,
+      count: active.length,
+      paidCount: active.filter((o) => o.payment_status === "paid").length,
+    };
+  }, [orders, days]);
 
   return (
     <>
-      <PageHead title="Analytics Center" subtitle="Demand signals, acquisition mix and sentiment tracking." />
+      <PageHead title="Analytics" subtitle="Orders and order value from the storefront. Order value counts all orders, paid or not." />
 
-      <div className="mb-6 flex flex-wrap gap-2">
+      <div className="mb-5 flex gap-2">
         {RANGES.map((r) => (
           <button
             key={r}
-            onClick={() => setRange(r)}
-            className={`hairline rounded-full px-4 py-2 text-xs transition-colors ${
-              range === r ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"
+            type="button"
+            onClick={() => setDays(r)}
+            className={`hairline h-9 rounded-xl px-4 text-xs transition-colors ${
+              days === r ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            {r}
+            Last {r} days
           </button>
         ))}
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-3">
-        <Panel title={`Sales trend · ${range}`} className="xl:col-span-2">
+      {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <Kpi label="Orders" value={String(view.count)} icon="bx-receipt" />
+        <Kpi label="Order Value" value={money(view.totalValue)} icon="bx-trending-up" />
+        <Kpi
+          label="Average Order"
+          value={view.count > 0 ? money(Math.round(view.totalValue / view.count)) : "—"}
+          icon="bx-calculator"
+        />
+        <Kpi label="Paid Orders" value={String(view.paidCount)} icon="bx-check-circle" />
+      </div>
+
+      <div className="mt-6 grid gap-4 xl:grid-cols-3">
+        <Panel title="Order value per day" className="xl:col-span-2">
+          {view.count === 0 ? (
+            <p className="py-16 text-center text-sm text-muted-foreground">
+              {loading ? "Loading…" : "No orders in this period yet."}
+            </p>
+          ) : (
+            <div className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={view.chart}>
+                  <CartesianGrid stroke="#262626" vertical={false} />
+                  <XAxis
+                    dataKey="label"
+                    stroke="#6b7280"
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={false}
+                    interval="preserveStartEnd"
+                    minTickGap={24}
+                  />
+                  <YAxis
+                    stroke="#6b7280"
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(v: number) => compact(v)}
+                  />
+                  <Tooltip formatter={(v) => money(Number(v))} contentStyle={tip} />
+                  <Area type="monotone" dataKey="value" stroke="#ffffff" fill="#ffffff22" strokeWidth={2} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </Panel>
+
+        <Panel title="Orders by delivery status">
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={data}>
-                <defs>
-                  <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#ffffff" stopOpacity={0.5} />
-                    <stop offset="100%" stopColor="#ffffff" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
+              <BarChart data={view.statusCounts}>
                 <CartesianGrid stroke="#262626" vertical={false} />
-                <XAxis dataKey="label" stroke="#6b7280" fontSize={11} tickLine={false} axisLine={false} />
-                <YAxis stroke="#6b7280" fontSize={11} tickLine={false} axisLine={false} />
-                <Tooltip contentStyle={tooltipStyle} />
-                <Area type="monotone" dataKey="sales" stroke="#ffffff" fill="url(#g1)" strokeWidth={2} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </Panel>
-
-        <Panel title="Traffic sources">
-          <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie data={TRAFFIC} dataKey="value" nameKey="name" innerRadius={55} outerRadius={90} paddingAngle={3}>
-                  {TRAFFIC.map((_, i) => (
-                    <Cell key={i} fill={COLORS[i % COLORS.length]} stroke="#000000" />
-                  ))}
-                </Pie>
-                <Legend wrapperStyle={{ fontSize: 11 }} />
-                <Tooltip contentStyle={tooltipStyle} />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </Panel>
-
-        <Panel title="Visitor flow">
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={data}>
-                <CartesianGrid stroke="#262626" vertical={false} />
-                <XAxis dataKey="label" stroke="#6b7280" fontSize={11} tickLine={false} axisLine={false} />
-                <YAxis stroke="#6b7280" fontSize={11} tickLine={false} axisLine={false} />
-                <Tooltip contentStyle={tooltipStyle} />
-                <Line type="monotone" dataKey="visits" stroke="#d4d4d4" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </Panel>
-
-        <Panel title="Customer sentiment" className="xl:col-span-2">
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={SENTIMENT}>
-                <CartesianGrid stroke="#262626" vertical={false} />
-                <XAxis dataKey="label" stroke="#6b7280" fontSize={11} tickLine={false} axisLine={false} />
-                <YAxis stroke="#6b7280" fontSize={11} tickLine={false} axisLine={false} />
-                <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "#ffffff08" }} />
-                <Bar dataKey="value" radius={[8, 8, 0, 0]}>
-                  {SENTIMENT.map((_, i) => (
-                    <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                  ))}
-                </Bar>
+                <XAxis dataKey="label" stroke="#6b7280" fontSize={10} tickLine={false} axisLine={false} interval={0} />
+                <YAxis stroke="#6b7280" fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} />
+                <Tooltip cursor={{ fill: "#ffffff08" }} contentStyle={tip} />
+                <Bar dataKey="value" fill="#ffffff" radius={[8, 8, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </Panel>
       </div>
+
+      <div className="mt-6 grid gap-4 xl:grid-cols-2">
+        <Panel title="Top products" className="overflow-x-auto">
+          {view.top.length === 0 ? (
+            <p className="py-8 text-center text-xs text-muted-foreground">
+              {loading ? "Loading…" : "No products ordered in this period."}
+            </p>
+          ) : (
+            <table className="w-full min-w-[360px] text-left text-xs">
+              <thead className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                <tr>
+                  <th className="pb-3">Product</th>
+                  <th className="pb-3">Units</th>
+                  <th className="pb-3">Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                {view.top.map((p) => (
+                  <tr key={p.name} className="border-t border-[#262626]/60">
+                    <td className="py-3">{p.name}</td>
+                    <td className="py-3 text-muted-foreground">{p.qty}</td>
+                    <td className="py-3 text-primary">{money(p.value)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Panel>
+
+        <Panel title="Order value by category">
+          {view.byCategory.length === 0 ? (
+            <p className="py-8 text-center text-xs text-muted-foreground">
+              {loading ? "Loading…" : "No orders in this period yet."}
+            </p>
+          ) : (
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={view.byCategory}>
+                  <CartesianGrid stroke="#262626" vertical={false} />
+                  <XAxis dataKey="label" stroke="#6b7280" fontSize={11} tickLine={false} axisLine={false} />
+                  <YAxis
+                    stroke="#6b7280"
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(v: number) => compact(v)}
+                  />
+                  <Tooltip cursor={{ fill: "#ffffff08" }} formatter={(v) => money(Number(v))} contentStyle={tip} />
+                  <Bar dataKey="value" fill="#ffffff" radius={[8, 8, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </Panel>
+      </div>
+
+      <p className="mt-6 text-xs text-muted-foreground">
+        Visitor traffic and customer sentiment will appear here once visit tracking and reviews are added.
+      </p>
     </>
   );
 }
