@@ -13,6 +13,7 @@ const json = (body: unknown, status = 200) =>
   });
 
 const clip = (v: unknown, max: number) => String(v ?? "").trim().slice(0, max);
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
@@ -29,7 +30,8 @@ Deno.serve(async (req) => {
   if (userErr || !userData.user) return json({ error: "Sign in required" }, 401);
   const userId = userData.user.id;
 
-  // 2. Read and clean the request.
+  // 2. Read and clean the request. Each line is a product and, for products with
+  //    sizes or colors, the chosen option (variant_id).
   let body: any;
   try {
     body = await req.json();
@@ -37,10 +39,14 @@ Deno.serve(async (req) => {
     return json({ error: "Invalid request" }, 400);
   }
   const rawItems = Array.isArray(body?.items) ? body.items.slice(0, 50) : [];
-  const items = rawItems.map((i: any) => ({
-    product_id: clip(i?.product_id, 200),
-    qty: Math.floor(Number(i?.qty)),
-  }));
+  const items = rawItems.map((i: any) => {
+    const variant = clip(i?.variant_id, 64);
+    return {
+      product_id: clip(i?.product_id, 200),
+      variant_id: UUID.test(variant) ? variant : null,
+      qty: Math.floor(Number(i?.qty)),
+    };
+  });
   if (items.length === 0 || items.some((i: any) => !i.product_id || !(i.qty >= 1 && i.qty <= 100))) {
     return json({ error: "Your cart is empty or invalid" }, 400);
   }
@@ -65,7 +71,8 @@ Deno.serve(async (req) => {
     return json({ error: "Too many unpaid orders. Please try again later." }, 429);
   }
 
-  // 4. Create the order. Stock is reserved only when payments are switched on.
+  // 4. Create the order. The database re-prices every line from the chosen option.
+  //    Stock is reserved only when payments are switched on.
   const paymentsEnabled = Boolean(Deno.env.get("PAWAPAY_API_TOKEN"));
   const { data, error } = await admin.rpc("create_checkout_order", {
     p_user_id: userId,

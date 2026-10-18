@@ -1,5 +1,17 @@
 import { supabase } from "./supabase";
-import { type Category, type Product } from "./products";
+import { type Category, type Product, type ProductVariant } from "./products";
+
+type VariantRow = {
+  id: string;
+  sku: string | null;
+  option1: string | null;
+  option2: string | null;
+  price: number | null;
+  stock: number;
+  image: string | null;
+  swatch: string | null;
+  position: number;
+};
 
 /** One row shape returned by catalog_products / product selects. */
 export type ProductRow = {
@@ -27,6 +39,9 @@ export type ProductRow = {
   created_at: string;
   wishlist_count?: number;
   order_count?: number;
+  option1_name?: string | null;
+  option2_name?: string | null;
+  product_variants?: VariantRow[] | null;
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -34,6 +49,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export function rowToProduct(row: ProductRow): Product {
   const created = new Date(row.created_at).getTime();
   const createdDaysAgo = Math.max(0, Math.floor((Date.now() - created) / DAY_MS));
+  const variants: ProductVariant[] = [...(row.product_variants ?? [])].sort((a, b) => a.position - b.position);
   return {
     id: row.id,
     name: row.name,
@@ -58,6 +74,9 @@ export function rowToProduct(row: ProductRow): Product {
     orders: row.order_count ?? 0,
     createdDaysAgo,
     tags: row.tags ?? [],
+    optionNames: [row.option1_name, row.option2_name].filter((n): n is string => Boolean(n)),
+    variants,
+    ...(row.sku ? { sku: row.sku } : {}),
   };
 }
 
@@ -93,11 +112,11 @@ export async function fetchCatalog(q: CatalogQuery): Promise<{ items: Product[];
   };
 }
 
-/** Single published product (works from SSR loader and client navigation). */
+/** Single published product with its options (works from SSR loader and client navigation). */
 export async function fetchProduct(id: string): Promise<Product | null> {
   const { data, error } = await supabase
     .from("products")
-    .select("*, category:categories(name)")
+    .select("*, category:categories(name), product_variants(*)")
     .eq("id", id)
     .is("archived_at", null)
     .maybeSingle();
@@ -114,7 +133,7 @@ export async function fetchCategoryNames(): Promise<string[]> {
     .select("name")
     .order("sort_order", { ascending: true });
   if (error) throw new Error(error.message);
-  return (data ?? []).map((c) => c.name as string);
+  return (data ?? []).map((c: { name: string }) => c.name);
 }
 
 /** Lowest/highest published price — feeds the FilterBar slider bounds. */

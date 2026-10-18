@@ -15,7 +15,8 @@ export function BottomNav() {
     pathname === "/login" ||
     pathname === "/register" ||
     pathname === "/admin" ||
-    pathname.startsWith("/admin/")
+    pathname.startsWith("/admin/") ||
+    chatOpen
   )
     return null;
 

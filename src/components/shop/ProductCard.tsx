@@ -1,4 +1,4 @@
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -26,8 +26,10 @@ export function StockBadge({ product, className }: { product: Product; className
 
 export function ProductCard({ product }: { product: Product }) {
   const { toggleWishlist, isWished, addToCart, setCartOpen } = useStore();
+  const navigate = useNavigate();
   const wished = isWished(product.id);
   const [added, setAdded] = useState(false);
+  const hasOptions = (product.optionNames?.length ?? 0) > 0;
 
   return (
     <article className="group relative flex flex-col overflow-hidden rounded-2xl border border-border bg-card hover:-translate-y-1 hover:border-primary/40 hover:shadow-[0_20px_50px_-24px_var(--primary)]">
@@ -73,11 +75,10 @@ export function ProductCard({ product }: { product: Product }) {
           >
             {product.name}
           </Link>
-          <span className="flex shrink-0 items-center gap-1 font-body text-xs text-muted-foreground">
-            <i className="bx bxs-star text-chart-3" />
-            {product.rating}
-          </span>
         </div>
+        {hasOptions && (
+          <p className="-mt-1 font-body text-[11px] text-muted-foreground">{product.optionNames?.join(" · ")}</p>
+        )}
 
         <StockBadge product={product} className="self-start" />
 
@@ -90,24 +91,38 @@ export function ProductCard({ product }: { product: Product }) {
               </p>
             )}
           </div>
-          <Button
-            size="icon"
-            variant="neon"
-            className="rounded-xl"
-            disabled={!product.inStock}
-            aria-label="Add to cart"
-            onClick={() => {
-              addToCart(product);
-              setAdded(true);
-              window.setTimeout(() => setAdded(false), 1200);
-              toast.success("Added to cart", {
-                description: product.name,
-                action: { label: "View cart", onClick: () => setCartOpen(true) },
-              });
-            }}
-          >
-            <i className={cn("text-xl", added ? "bx bx-check" : "bx bx-plus")} />
-          </Button>
+          {hasOptions ? (
+            <Button
+              size="icon"
+              variant="neon"
+              className="rounded-xl"
+              disabled={!product.inStock}
+              aria-label="Choose options"
+              title="Choose options"
+              onClick={() => void navigate({ to: "/product/$productId", params: { productId: product.id } })}
+            >
+              <i className="bx bx-right-arrow-alt text-xl" />
+            </Button>
+          ) : (
+            <Button
+              size="icon"
+              variant="neon"
+              className="rounded-xl"
+              disabled={!product.inStock}
+              aria-label="Add to cart"
+              onClick={() => {
+                addToCart(product);
+                setAdded(true);
+                window.setTimeout(() => setAdded(false), 1200);
+                toast.success("Added to cart", {
+                  description: product.name,
+                  action: { label: "View cart", onClick: () => setCartOpen(true) },
+                });
+              }}
+            >
+              <i className={cn("text-xl", added ? "bx bx-check" : "bx bx-plus")} />
+            </Button>
+          )}
         </div>
       </div>
     </article>

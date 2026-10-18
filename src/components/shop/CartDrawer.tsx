@@ -1,92 +1,193 @@
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { useIsMobile } from "@/lib/appFrame";
 import { money } from "@/lib/products";
 import { useStore } from "@/lib/store";
+import { cn } from "@/lib/utils";
 import { CheckoutDialog } from "./CheckoutDialog";
+import { EditOptionsDialog } from "./EditOptionsDialog";
 
 export function CartDrawer() {
-  const { cart, cartOpen, setCartOpen, removeFromCart, setQty, cartTotal } = useStore();
+  const { cart, cartOpen, setCartOpen, removeFromCart, setQty, cartTotal, addToCart } = useStore();
   const [checkout, setCheckout] = useState(false);
+  const [editing, setEditing] = useState<(typeof cart)[number] | null>(null);
+  const isMobile = useIsMobile();
+  const navigate = useNavigate();
+  const count = cart.reduce((n, i) => n + i.qty, 0);
+
+  const remove = (item: (typeof cart)[number]) => {
+    removeFromCart(item.product.id);
+    toast("Removed from cart", {
+      description: item.product.name,
+      action: { label: "Undo", onClick: () => addToCart(item.product, item.qty) },
+    });
+  };
 
   return (
     <>
       <Sheet open={cartOpen} onOpenChange={setCartOpen}>
-        <SheetContent className="flex w-full flex-col gap-0 border-border bg-card/95 backdrop-blur-xl sm:max-w-md">
-          <SheetHeader>
-            <SheetTitle className="font-display">Your cart</SheetTitle>
-            <SheetDescription className="font-body">
-              Review your items, then continue to checkout.
-            </SheetDescription>
+        <SheetContent
+          side={isMobile ? "bottom" : "right"}
+          className={cn(
+            "flex flex-col gap-0 border-border bg-card p-0",
+            isMobile ? "h-[88dvh] rounded-t-3xl" : "w-full sm:max-w-md",
+          )}
+        >
+          <SheetHeader className="shrink-0 border-b border-border px-5 py-4 pr-12 text-left">
+            <SheetTitle className="font-display text-lg">
+              Your cart
+              {count > 0 && (
+                <span className="ml-2 font-body text-sm font-normal text-muted-foreground">
+                  {count} {count === 1 ? "item" : "items"}
+                </span>
+              )}
+            </SheetTitle>
+            <SheetDescription className="sr-only">Review your items, then continue to checkout.</SheetDescription>
           </SheetHeader>
 
-          <div className="-mx-6 flex-1 space-y-3 overflow-y-auto px-6 py-4">
-            {cart.length === 0 && (
-              <div className="grid place-items-center gap-2 py-20 text-center">
-                <i className="bx bx-shopping-bag text-4xl text-muted-foreground" />
-                <p className="font-body text-sm text-muted-foreground">Your cart is empty.</p>
-              </div>
-            )}
-            {cart.map((item) => (
-              <div
-                key={item.product.id}
-                className="grid grid-cols-[64px_minmax(0,1fr)_auto] items-center gap-3 rounded-xl border border-border bg-background/40 p-2"
+          {cart.length === 0 ? (
+            <div className="grid flex-1 place-content-center justify-items-center gap-3 px-6 text-center">
+              <span className="grid size-16 place-items-center rounded-full bg-secondary text-muted-foreground">
+                <i className="bx bx-shopping-bag text-3xl" />
+              </span>
+              <p className="font-display text-base font-semibold">Your cart is empty</p>
+              <p className="max-w-[16rem] font-body text-sm text-muted-foreground">
+                Add something you like and it will wait for you here.
+              </p>
+              <Button
+                variant="neon"
+                className="mt-1 rounded-xl"
+                onClick={() => {
+                  setCartOpen(false);
+                  void navigate({ to: "/" });
+                }}
               >
-                <img
-                  src={item.product.images[0]}
-                  alt={item.product.name}
-                  className="h-16 w-16 shrink-0 rounded-lg object-cover"
-                />
-                <div className="min-w-0">
-                  <p className="truncate font-display text-sm font-medium">{item.product.name}</p>
-                  <p className="font-body text-xs text-muted-foreground">{money(item.product.price)}</p>
-                  <div className="mt-1 flex items-center gap-1">
-                    <button
-                      className="grid h-6 w-6 place-items-center rounded-md border border-border text-muted-foreground hover:text-foreground"
-                      onClick={() => setQty(item.product.id, item.qty - 1)}
-                      aria-label="Decrease quantity"
-                    >
-                      <i className="bx bx-minus" />
-                    </button>
-                    <span className="w-6 text-center font-body text-xs">{item.qty}</span>
-                    <button
-                      className="grid h-6 w-6 place-items-center rounded-md border border-border text-muted-foreground hover:text-foreground"
-                      onClick={() => setQty(item.product.id, item.qty + 1)}
-                      aria-label="Increase quantity"
-                    >
-                      <i className="bx bx-plus" />
-                    </button>
-                  </div>
-                </div>
-                <button
-                  className="shrink-0 self-start p-1 text-muted-foreground hover:text-destructive"
-                  onClick={() => removeFromCart(item.product.id)}
-                  aria-label="Remove item"
-                >
-                  <i className="bx bx-trash text-lg" />
-                </button>
-              </div>
-            ))}
-          </div>
-
-          <div className="space-y-3 border-t border-border pt-4">
-            <div className="flex items-center justify-between font-display">
-              <span className="text-muted-foreground">Total</span>
-              <span className="text-xl font-semibold text-primary">{money(cartTotal)}</span>
+                Browse the shop
+              </Button>
             </div>
-            <Button
-              variant="neon"
-              size="lg"
-              className="w-full"
-              disabled={cart.length === 0}
-              onClick={() => setCheckout(true)}
-            >
-              <i className="bx bx-credit-card text-xl" /> Checkout
-            </Button>
-          </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4">
+              <ul className="divide-y divide-border">
+                {cart.map((item) => {
+                  const atMax = item.qty >= item.product.stock;
+                  return (
+                    <li key={item.product.id} className="flex gap-3 py-4 first:pt-0">
+                      <Link
+                        to="/product/$productId"
+                        params={{ productId: item.product.baseId ?? item.product.id }}
+                        onClick={() => setCartOpen(false)}
+                        className="shrink-0"
+                      >
+                        <img
+                          src={item.product.images[0]}
+                          alt=""
+                          className="size-[72px] rounded-xl object-cover"
+                        />
+                      </Link>
+                      <div className="flex min-w-0 flex-1 flex-col">
+                        <div className="flex items-start justify-between gap-2">
+                          <Link
+                            to="/product/$productId"
+                            params={{ productId: item.product.baseId ?? item.product.id }}
+                            onClick={() => setCartOpen(false)}
+                            className="line-clamp-2 font-display text-sm font-medium leading-snug hover:text-primary"
+                          >
+                            {item.product.name}
+                          </Link>
+                          <button
+                            type="button"
+                            aria-label="Remove item"
+                            className="-mr-1 shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:text-destructive"
+                            onClick={() => remove(item)}
+                          >
+                            <i className="bx bx-trash text-lg" />
+                          </button>
+                        </div>
+                        {item.product.variantLabel && (
+                          <p className="font-body text-xs text-foreground/80">
+                            {item.product.variantLabel}
+                            <button
+                              type="button"
+                              onClick={() => setEditing(item)}
+                              className="ml-2 text-primary hover:underline"
+                            >
+                              Change
+                            </button>
+                          </p>
+                        )}
+                        <p className="font-body text-xs text-muted-foreground">{money(item.product.price)} each</p>
+                        <div className="mt-auto flex items-center justify-between pt-2">
+                          <div className="flex items-center rounded-full border border-border">
+                            <button
+                              type="button"
+                              aria-label="Decrease quantity"
+                              className="grid size-9 place-items-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
+                              onClick={() => (item.qty <= 1 ? remove(item) : setQty(item.product.id, item.qty - 1))}
+                            >
+                              <i className="bx bx-minus" />
+                            </button>
+                            <span className="w-7 text-center font-body text-sm">{item.qty}</span>
+                            <button
+                              type="button"
+                              aria-label="Increase quantity"
+                              disabled={atMax}
+                              className="grid size-9 place-items-center rounded-full text-muted-foreground transition-colors hover:text-foreground disabled:opacity-30"
+                              onClick={() => setQty(item.product.id, item.qty + 1)}
+                            >
+                              <i className="bx bx-plus" />
+                            </button>
+                          </div>
+                          <p className="font-display text-sm font-semibold">
+                            {money(item.product.price * item.qty)}
+                          </p>
+                        </div>
+                        {item.product.stock <= 3 && (
+                          <p className="mt-1 font-body text-[11px] text-warning">Only {item.product.stock} left</p>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
+          {cart.length > 0 && (
+            <div className="shrink-0 border-t border-border bg-card px-5 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4">
+              <dl className="grid gap-1.5 font-body text-sm">
+                <div className="flex justify-between">
+                  <dt className="text-muted-foreground">Subtotal</dt>
+                  <dd>{money(cartTotal)}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-muted-foreground">Delivery</dt>
+                  <dd className="text-muted-foreground">Confirmed after you order</dd>
+                </div>
+              </dl>
+              <Button
+                variant="neon"
+                size="lg"
+                className="mt-4 h-12 w-full rounded-xl text-base"
+                onClick={() => setCheckout(true)}
+              >
+                Checkout · {money(cartTotal)}
+              </Button>
+              <button
+                type="button"
+                onClick={() => setCartOpen(false)}
+                className="mt-1 w-full py-2.5 text-center font-body text-sm text-muted-foreground transition-colors hover:text-foreground"
+              >
+                Continue shopping
+              </button>
+            </div>
+          )}
         </SheetContent>
       </Sheet>
 
+      {editing && <EditOptionsDialog key={editing.product.id} item={editing} onClose={() => setEditing(null)} />}
       <CheckoutDialog open={checkout} onOpenChange={setCheckout} items={cart} />
     </>
   );
