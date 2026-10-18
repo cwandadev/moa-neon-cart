@@ -7,6 +7,7 @@ import { useIsMobile } from "@/lib/appFrame";
 import { money } from "@/lib/products";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { SheetGrabber } from "@/components/shop/SheetGrabber";
 import { CheckoutDialog } from "./CheckoutDialog";
 import { EditOptionsDialog } from "./EditOptionsDialog";
 
@@ -33,10 +34,11 @@ export function CartDrawer() {
           side={isMobile ? "bottom" : "right"}
           className={cn(
             "flex flex-col gap-0 border-border bg-card p-0",
-            isMobile ? "h-[88dvh] rounded-t-3xl" : "w-full sm:max-w-md",
+            isMobile ? "h-[80dvh] rounded-t-3xl" : "w-full sm:max-w-md",
           )}
         >
-          <SheetHeader className="shrink-0 border-b border-border px-5 py-4 pr-12 text-left">
+          {isMobile && <SheetGrabber />}
+          <SheetHeader className="shrink-0 border-b border-border px-5 pb-4 pr-14 pt-7 text-left md:pt-4">
             <SheetTitle className="font-display text-lg">
               Your cart
               {count > 0 && (
