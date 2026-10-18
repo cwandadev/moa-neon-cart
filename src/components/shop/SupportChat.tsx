@@ -8,6 +8,7 @@ import { bumpChatUnread, setChatUnread, useChatUnread } from "@/lib/chatUnread";
 import { useStore } from "@/lib/store";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
+import { useSwipeDown } from "@/lib/swipe";
 import { useAppFrame, useIsMobile } from "@/lib/appFrame";
 
 type Msg = {
@@ -69,6 +70,11 @@ export function SupportChat() {
     pathname.startsWith("/admin/");
 
   const frame = useAppFrame(open && isMobile && !hidden, { coverNav: true });
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const swipe = useSwipeDown(
+    () => setOpen(false),
+    () => panelRef.current,
+  );
 
   const openRef = useRef(open);
   const hiddenRef = useRef(hidden);
@@ -296,15 +302,20 @@ export function SupportChat() {
     <div className="fixed bottom-5 right-5 z-50 flex flex-col items-end gap-3 max-md:bottom-24">
       {open && (
         <div
+          ref={panelRef}
           className={cn(
-            "flex flex-col overflow-hidden border border-border bg-card shadow-[0_24px_60px_-24px_black]",
+            "relative flex flex-col overflow-hidden border border-border bg-card shadow-[0_24px_60px_-24px_black]",
             "md:h-[28rem] md:w-[22rem] md:rounded-2xl",
             "max-md:fixed max-md:inset-x-0 max-md:z-50 max-md:rounded-t-3xl max-md:border-x-0 max-md:border-b-0",
             frame?.keyboard && "max-md:rounded-none max-md:border-t-0",
           )}
           style={isMobile ? { top: frame?.top ?? 120, bottom: frame?.bottom ?? 0 } : undefined}
         >
-          <div className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">
+          <span className="pointer-events-none absolute left-1/2 top-1.5 h-1 w-10 -translate-x-1/2 rounded-full bg-muted-foreground/40 md:hidden" />
+          <div
+            {...swipe}
+            className="flex shrink-0 touch-none items-center gap-3 border-b border-border px-4 pb-3 pt-4 md:py-3"
+          >
             <span className="grid size-10 shrink-0 place-items-center rounded-full bg-primary/15 text-primary">
               <i className="bx bx-support text-xl" />
             </span>
@@ -315,7 +326,7 @@ export function SupportChat() {
             <button
               onClick={() => setOpen(false)}
               aria-label="Close chat"
-              className="grid size-9 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              className="grid size-11 place-items-center rounded-full bg-secondary/70 text-foreground transition-colors hover:bg-secondary"
             >
               <i className="bx bx-x text-2xl" />
             </button>

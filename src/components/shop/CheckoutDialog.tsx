@@ -161,7 +161,7 @@ export function CheckoutDialog({
             : undefined
         }
       >
-        <DialogHeader className="shrink-0 border-b border-border px-5 py-4 pr-12 text-left">
+        <DialogHeader className="shrink-0 border-b border-border px-5 py-4 pr-14 text-left">
           <DialogTitle className="text-lg">
             {receipt ? (receipt.payments ? "Pay for your order" : "Order received") : "Checkout"}
           </DialogTitle>

@@ -1,16 +1,21 @@
-import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
+import { Link, useRouterState } from "@tanstack/react-router";
 import { UserMenu } from "@/components/shop/UserMenu";
-import { useStore } from "@/lib/store";
 import { useChatUnread } from "@/lib/chatUnread";
+import { useStore } from "@/lib/store";
+import { cn } from "@/lib/utils";
 
-const iconBtn =
-  "relative grid size-11 place-items-center rounded-full text-muted-foreground transition-colors hover:text-foreground";
+const cell =
+  "relative flex h-14 flex-col items-center justify-center gap-0.5 rounded-2xl text-muted-foreground transition-colors hover:text-foreground active:bg-secondary/60";
+const labelClass = "font-body text-[10px] font-medium leading-none";
+
+function Bar({ on }: { on: boolean }) {
+  return on ? <span className="absolute inset-x-5 top-0 h-0.5 rounded-full bg-primary" /> : null;
+}
 
 export function BottomNav() {
   const { cartCount, wishlist, setCartOpen, chatOpen, setChatOpen } = useStore();
   const chatUnread = useChatUnread();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const navigate = useNavigate();
   if (
     pathname === "/login" ||
     pathname === "/register" ||
@@ -20,52 +25,90 @@ export function BottomNav() {
   )
     return null;
 
+  const homeOn = pathname === "/" || pathname.startsWith("/product/");
+  const savedOn = pathname === "/wishlist";
+  const accountOn = pathname === "/account" || pathname.startsWith("/orders") || pathname === "/notifications";
+
   return (
     <>
       <div className="h-24 md:hidden" />
       <nav
         aria-label="Mobile navigation"
-        className="fixed inset-x-3 bottom-3 z-40 flex items-center justify-between rounded-3xl border border-border bg-card px-5 py-2.5 md:hidden"
+        className="fixed inset-x-3 z-40 grid grid-cols-5 items-center rounded-3xl border border-border bg-card p-1.5 md:hidden"
+        style={{ bottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
       >
-        <button type="button" aria-label="Cart" onClick={() => setCartOpen(true)} className={iconBtn}>
-          <i className="bx bx-cart text-2xl" />
-          {cartCount > 0 && (
-            <span key={cartCount} className="absolute right-0 top-0 grid h-4 min-w-4 animate-in zoom-in-50 duration-200 place-items-center rounded-full bg-primary px-1 font-body text-[10px] font-semibold text-primary-foreground">
-              {cartCount}
-            </span>
-          )}
+        <button type="button" aria-label="Cart" onClick={() => setCartOpen(true)} className={cell}>
+          <span className="relative">
+            <i className="bx bx-cart text-2xl" />
+            {cartCount > 0 && (
+              <span
+                key={cartCount}
+                className="absolute -right-2 -top-1.5 grid h-4 min-w-4 animate-in zoom-in-50 duration-200 place-items-center rounded-full bg-primary px-1 font-body text-[10px] font-semibold text-primary-foreground"
+              >
+                {cartCount}
+              </span>
+            )}
+          </span>
+          <span className={labelClass}>Cart</span>
         </button>
-        <button type="button" aria-label="Wishlist" onClick={() => navigate({ to: "/wishlist" })} className={iconBtn}>
-          <i className="bx bx-heart text-2xl" />
-          {wishlist.length > 0 && (
-            <span
-              key={wishlist.length}
-              className="absolute right-0 top-0 grid h-4 min-w-4 animate-in zoom-in-50 duration-200 place-items-center rounded-full bg-accent px-1 font-body text-[10px] font-semibold text-accent-foreground"
-            >
-              {wishlist.length}
-            </span>
-          )}
-        </button>
+
+        <Link
+          to="/wishlist"
+          aria-label="Saved items"
+          aria-current={savedOn ? "page" : undefined}
+          className={cn(cell, savedOn && "text-primary")}
+        >
+          <Bar on={savedOn} />
+          <span className="relative">
+            <i className={cn("text-2xl", savedOn ? "bx bxs-heart" : "bx bx-heart")} />
+            {wishlist.length > 0 && (
+              <span
+                key={wishlist.length}
+                className="absolute -right-2 -top-1.5 grid h-4 min-w-4 animate-in zoom-in-50 duration-200 place-items-center rounded-full bg-accent px-1 font-body text-[10px] font-semibold text-accent-foreground"
+              >
+                {wishlist.length}
+              </span>
+            )}
+          </span>
+          <span className={labelClass}>Saved</span>
+        </Link>
+
         <Link
           to="/"
           aria-label="Home"
+          aria-current={homeOn ? "page" : undefined}
           onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-          className="grid size-12 place-items-center"
+          className={cn(cell, homeOn && "text-primary")}
         >
-          <img src="/logo.svg" alt="" className="size-12" />
+          <Bar on={homeOn} />
+          <img src="/logo.svg" alt="" className="size-7" />
+          <span className={labelClass}>Home</span>
         </Link>
-        <button type="button" aria-label="Chat" onClick={() => setChatOpen(!chatOpen)} className={iconBtn}>
-          {chatUnread > 0 && !chatOpen && (
-            <span
-              key={chatUnread}
-              className="absolute right-0 top-0 grid h-4 min-w-4 animate-in zoom-in-50 duration-200 place-items-center rounded-full bg-destructive px-1 font-body text-[10px] font-semibold text-white"
-            >
-              {chatUnread > 9 ? "9+" : chatUnread}
-            </span>
-          )}
-          <i className="bx bx-message-dots text-2xl" />
+
+        <button type="button" aria-label="Chat" onClick={() => setChatOpen(!chatOpen)} className={cell}>
+          <span className="relative">
+            <i className="bx bx-message-dots text-2xl" />
+            {chatUnread > 0 && !chatOpen && (
+              <span
+                key={chatUnread}
+                className="absolute -right-2 -top-1.5 grid h-4 min-w-4 animate-in zoom-in-50 duration-200 place-items-center rounded-full bg-destructive px-1 font-body text-[10px] font-semibold text-white"
+              >
+                {chatUnread > 9 ? "9+" : chatUnread}
+              </span>
+            )}
+          </span>
+          <span className={labelClass}>Chat</span>
         </button>
-        <UserMenu variant="nav" className={iconBtn} />
+
+        <UserMenu
+          variant="nav"
+          className={cn(
+            cell,
+            "after:font-body after:text-[10px] after:font-medium after:leading-none after:content-['Account'] [&_i]:text-current",
+            accountOn &&
+              "text-primary before:absolute before:inset-x-5 before:top-0 before:h-0.5 before:rounded-full before:bg-primary before:content-['']",
+          )}
+        />
       </nav>
     </>
   );
