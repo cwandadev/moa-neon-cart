@@ -26,11 +26,11 @@ const toneStyle = (cssVar: string, fallback: string) =>
 
 async function compute(): Promise<AdminAlerts | null> {
   const [pend, oldest, out, low, convs] = await Promise.all([
-    supabase.from("orders").select("id", { count: "exact", head: true }).eq("fulfilment_status", "pending"),
+    supabase.from("orders").select("id", { count: "exact", head: true }).eq("fulfilment_status", "confirmed"),
     supabase
       .from("orders")
       .select("created_at")
-      .eq("fulfilment_status", "pending")
+      .eq("fulfilment_status", "confirmed")
       .order("created_at", { ascending: true })
       .limit(1),
     supabase.from("products").select("id", { count: "exact", head: true }).is("archived_at", null).lte("stock", 0),
@@ -55,11 +55,11 @@ async function compute(): Promise<AdminAlerts | null> {
   const oldestAt = (oldest.data?.[0] as { created_at?: string } | undefined)?.created_at;
   const orders: Alert =
     pendingCount === 0
-      ? { level: "green", count: 0, label: "No orders waiting" }
+      ? { level: "green", count: 0, label: "Nothing to dispatch" }
       : {
           level: oldestAt && now - new Date(oldestAt).getTime() > DAY ? "red" : "orange",
           count: pendingCount,
-          label: `${pendingCount} order${pendingCount === 1 ? "" : "s"} waiting for confirmation`,
+          label: `${pendingCount} order${pendingCount === 1 ? "" : "s"} ready to dispatch`,
         };
 
   const outCount = out.count ?? 0;
@@ -134,7 +134,7 @@ export function useAdminAlerts(enabled: boolean): AdminAlerts {
       .channel("admin-alerts")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "orders" }, (payload) => {
         schedule();
-        if (!live || pathRef.current.startsWith("/admin/orders")) return;
+        if (!live || pathRef.current.startsWith("/admin/orders") || (payload.new as { stock_reserved?: boolean }).stock_reserved) return;
         const o = payload.new as unknown as { code?: string; customer_name?: string; total?: number };
         toast(`New order ${o.code ?? ""}`.trim(), {
           description: `${o.customer_name ?? "A customer"}${o.total ? ` · ${money(o.total)}` : ""}`,

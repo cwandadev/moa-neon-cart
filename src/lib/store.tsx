@@ -1,6 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useAuth } from "./auth";
 import { supabase } from "./supabase";
+import { rowToProduct, type ProductRow } from "./catalog";
+import { lineProductFor } from "./variants";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { showWishlistToast } from "@/components/shop/wishToast";
@@ -238,6 +240,87 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
   }, [userId]);
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [cartReady, setCartReady] = useState(false);
+
+  // The cart survives a refresh: load it once, then keep it saved.
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem("moa-cart-v1");
+      if (raw) {
+        const parsed: unknown = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          const items: CartItem[] = parsed
+            .filter((i) => i && typeof i === "object" && typeof i.qty === "number" && Boolean(i.product?.id))
+            .slice(0, 50)
+            .map((i) => ({ product: i.product, qty: Math.min(100, Math.max(1, Math.floor(i.qty))) }));
+          setCart(items);
+        }
+      }
+    } catch {
+      /* unreadable saved cart: start empty */
+    }
+    setCartReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!cartReady) return;
+    try {
+      window.localStorage.setItem("moa-cart-v1", JSON.stringify(cart));
+    } catch {
+      /* storage blocked: the cart stays in memory only */
+    }
+  }, [cart, cartReady]);
+
+  // After loading, refresh prices and stock from the database and drop items that are gone.
+  useEffect(() => {
+    if (!cartReady) return;
+    const snapshot = cart;
+    const ids = Array.from(new Set(snapshot.map((i) => i.product.baseId ?? i.product.id)));
+    if (ids.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { data } = await supabase
+          .from("products")
+          .select("*, category:categories(name), product_variants(*)")
+          .in("id", ids)
+          .is("archived_at", null);
+        if (cancelled || !data) return;
+        const rows = data as unknown as (ProductRow & { category: { name: string } | null })[];
+        const fresh = new Map(
+          rows.map((r) => [
+            r.id,
+            rowToProduct({ ...r, ...(r.category?.name ? { category_name: r.category.name } : {}) }),
+          ]),
+        );
+        const refreshed = (i: CartItem): CartItem | null => {
+          const p = fresh.get(i.product.baseId ?? i.product.id);
+          if (!p) return null;
+          if (i.product.variantId) {
+            const v = p.variants?.find((x) => x.id === i.product.variantId);
+            if (!v || v.stock <= 0) return null;
+            return { product: lineProductFor(p, v), qty: Math.min(i.qty, v.stock) };
+          }
+          if ((p.variants?.length ?? 0) > 0 || p.stock <= 0) return null;
+          return { product: p, qty: Math.min(i.qty, p.stock) };
+        };
+        const removed = snapshot.filter((i) => refreshed(i) === null).length;
+        setCart((prev) =>
+          prev.flatMap((i) => {
+            const n = refreshed(i);
+            return n ? [n] : [];
+          }),
+        );
+        if (removed > 0) toast("Some items in your cart are no longer available and were removed.");
+      } catch {
+        /* keep the saved cart */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cartReady]);
   const [cartOpen, setCartOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [products, setProducts] = useState<AdminProduct[]>(buildSeedProducts);

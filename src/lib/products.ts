@@ -45,6 +45,24 @@ export type Product = {
   orders: number;
   createdDaysAgo: number;
   tags: string[];
+  optionNames?: string[] | undefined;
+  variants?: ProductVariant[] | undefined;
+  baseId?: string | undefined;
+  variantId?: string | undefined;
+  variantLabel?: string | undefined;
+  sku?: string | undefined;
+};
+
+export type ProductVariant = {
+  id: string;
+  sku: string | null;
+  option1: string | null;
+  option2: string | null;
+  price: number | null;
+  stock: number;
+  image: string | null;
+  swatch: string | null;
+  position: number;
 };
 
 /**

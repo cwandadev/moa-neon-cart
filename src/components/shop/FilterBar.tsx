@@ -27,7 +27,6 @@ const sorts: { id: Filters["sort"]; label: string }[] = [
   { id: "new", label: "Newest" },
   { id: "price-asc", label: "Price ↑" },
   { id: "price-desc", label: "Price ↓" },
-  { id: "rating", label: "Top rated" },
 ];
 
 export function FilterBar({
@@ -145,27 +144,6 @@ export function FilterBar({
                 checked={filters.inStockOnly}
                 onCheckedChange={(v) => onChange({ ...filters, inStockOnly: v })}
               />
-            </div>
-            <div>
-              <p className="mb-2 font-display text-xs uppercase tracking-widest text-muted-foreground">
-                Rating
-              </p>
-              <div className="flex gap-1.5">
-                {[0, 3, 4, 4.5].map((r) => (
-                  <button
-                    key={r}
-                    onClick={() => onChange({ ...filters, minRating: r })}
-                    className={cn(
-                      "rounded-full border px-2.5 py-1 font-body text-xs transition-colors",
-                      filters.minRating === r
-                        ? "border-chart-3/50 bg-chart-3/15 text-chart-3"
-                        : "border-border text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    {r === 0 ? "All" : `${r}+`}
-                  </button>
-                ))}
-              </div>
             </div>
             <Button variant="ghost" size="sm" className="font-body" onClick={() => onChange(defaultFilters)}>
               <i className="bx bx-reset text-base" /> Reset filters
