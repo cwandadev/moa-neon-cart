@@ -8,10 +8,6 @@ const cell =
   "relative flex h-14 flex-col items-center justify-center gap-0.5 rounded-2xl text-muted-foreground transition-colors hover:text-foreground active:bg-secondary/60";
 const labelClass = "font-body text-[10px] font-medium leading-none";
 
-function Bar({ on }: { on: boolean }) {
-  return on ? <span className="absolute inset-x-5 top-0 h-0.5 rounded-full bg-primary" /> : null;
-}
-
 export function BottomNav() {
   const { cartCount, wishlist, setCartOpen, chatOpen, setChatOpen } = useStore();
   const chatUnread = useChatUnread();
@@ -58,7 +54,6 @@ export function BottomNav() {
           aria-current={savedOn ? "page" : undefined}
           className={cn(cell, savedOn && "text-primary")}
         >
-          <Bar on={savedOn} />
           <span className="relative">
             <i className={cn("text-2xl", savedOn ? "bx bxs-heart" : "bx bx-heart")} />
             {wishlist.length > 0 && (
@@ -78,11 +73,9 @@ export function BottomNav() {
           aria-label="Home"
           aria-current={homeOn ? "page" : undefined}
           onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-          className={cn(cell, homeOn && "text-primary")}
+          className="grid h-14 place-items-center"
         >
-          <Bar on={homeOn} />
-          <img src="/logo.svg" alt="" className="size-7" />
-          <span className={labelClass}>Home</span>
+          <img src="/logo.svg" alt="" className="size-12" />
         </Link>
 
         <button type="button" aria-label="Chat" onClick={() => setChatOpen(!chatOpen)} className={cell}>
@@ -105,8 +98,7 @@ export function BottomNav() {
           className={cn(
             cell,
             "after:font-body after:text-[10px] after:font-medium after:leading-none after:content-['Account'] [&_i]:text-current",
-            accountOn &&
-              "text-primary before:absolute before:inset-x-5 before:top-0 before:h-0.5 before:rounded-full before:bg-primary before:content-['']",
+            accountOn && "text-primary",
           )}
         />
       </nav>

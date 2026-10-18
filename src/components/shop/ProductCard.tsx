@@ -30,26 +30,33 @@ export function ProductCard({ product }: { product: Product }) {
   const wished = isWished(product.id);
   const [added, setAdded] = useState(false);
   const hasOptions = (product.optionNames?.length ?? 0) > 0;
+  const stock = stockLabel(product);
+  const soldOut = !product.inStock;
 
   return (
-    <article className="group relative flex flex-col overflow-hidden rounded-2xl border border-border bg-card hover:-translate-y-1 hover:border-primary/40 hover:shadow-[0_20px_50px_-24px_var(--primary)]">
+    <article className="group relative flex h-full flex-col overflow-hidden rounded-2xl border border-border bg-card hover:border-primary/40 sm:hover:-translate-y-1 sm:hover:shadow-[0_20px_50px_-24px_var(--primary)]">
       <Link
         to="/product/$productId"
         params={{ productId: product.id }}
-        className="relative block aspect-[4/5] overflow-hidden bg-muted"
+        className="relative block aspect-square overflow-hidden bg-muted sm:aspect-[4/5]"
       >
         <img
           src={product.images[0]}
           alt={product.name}
           loading="lazy"
-          className="h-full w-full object-cover "
+          className={cn("h-full w-full object-cover", soldOut && "opacity-60")}
         />
-        <span className="absolute left-3 top-3 rounded-full bg-background/90 px-2.5 py-1 font-body text-[11px] text-muted-foreground">
+        <span className="absolute left-2 top-2 max-w-[60%] truncate rounded-full bg-background/90 px-2 py-0.5 font-body text-[10px] text-muted-foreground sm:left-3 sm:top-3 sm:px-2.5 sm:py-1 sm:text-[11px]">
           {product.category}
         </span>
-        {product.createdDaysAgo < 25 && (
-          <span className="absolute bottom-3 left-3 rounded-full bg-primary px-2.5 py-1 font-body text-[11px] font-semibold text-primary-foreground">
+        {product.createdDaysAgo < 25 && !soldOut && (
+          <span className="absolute bottom-2 left-2 rounded-full bg-primary px-2 py-0.5 font-body text-[10px] font-semibold text-primary-foreground sm:bottom-3 sm:left-3 sm:px-2.5 sm:py-1 sm:text-[11px]">
             New
+          </span>
+        )}
+        {soldOut && (
+          <span className="absolute bottom-2 left-2 rounded-full bg-background/90 px-2 py-0.5 font-body text-[10px] font-semibold text-destructive sm:bottom-3 sm:left-3 sm:px-2.5 sm:py-1 sm:text-[11px]">
+            Sold out
           </span>
         )}
       </Link>
@@ -59,34 +66,31 @@ export function ProductCard({ product }: { product: Product }) {
         aria-label="Toggle wishlist"
         onClick={() => toggleWishlist(product.id)}
         className={cn(
-          "absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-full border border-border bg-background/90 transition-colors",
+          "absolute right-2 top-2 grid size-8 place-items-center rounded-full border border-border bg-background/90 transition-colors sm:right-3 sm:top-3 sm:size-9",
           wished ? "text-accent" : "text-muted-foreground hover:text-foreground",
         )}
       >
-        <i className={cn("text-xl", wished ? "bx bxs-heart" : "bx bx-heart")} />
+        <i className={cn("text-lg sm:text-xl", wished ? "bx bxs-heart" : "bx bx-heart")} />
       </button>
 
-      <div className="flex flex-1 flex-col gap-2 p-4">
-        <div className="flex items-start justify-between gap-2">
-          <Link
-            to="/product/$productId"
-            params={{ productId: product.id }}
-            className="min-w-0 font-display text-sm font-semibold leading-snug hover:text-primary"
-          >
-            {product.name}
-          </Link>
-        </div>
+      <div className="flex flex-1 flex-col gap-1.5 p-3 sm:gap-2 sm:p-4">
+        <Link
+          to="/product/$productId"
+          params={{ productId: product.id }}
+          className="line-clamp-2 min-h-[2.4rem] font-display text-[13px] font-semibold leading-snug hover:text-primary sm:min-h-0 sm:text-sm"
+        >
+          {product.name}
+        </Link>
         {hasOptions && (
-          <p className="-mt-1 font-body text-[11px] text-muted-foreground">{product.optionNames?.join(" · ")}</p>
+          <p className="-mt-1 truncate font-body text-[11px] text-muted-foreground">{product.optionNames?.join(" · ")}</p>
         )}
+        {stock.tone === "low" && <StockBadge product={product} className="self-start px-2 py-0.5 text-[10px]" />}
 
-        <StockBadge product={product} className="self-start" />
-
-        <div className="mt-auto flex items-end justify-between gap-2 pt-2">
+        <div className="mt-auto flex items-end justify-between gap-2 pt-1 sm:pt-2">
           <div className="min-w-0">
-            <p className="font-display text-lg font-semibold">{money(product.price)}</p>
+            <p className="font-display text-base font-semibold leading-tight sm:text-lg">{money(product.price)}</p>
             {product.oldPrice && (
-              <p className="font-body text-xs text-muted-foreground line-through">
+              <p className="font-body text-[11px] text-muted-foreground line-through sm:text-xs">
                 {money(product.oldPrice)}
               </p>
             )}
@@ -95,8 +99,8 @@ export function ProductCard({ product }: { product: Product }) {
             <Button
               size="icon"
               variant="neon"
-              className="rounded-xl"
-              disabled={!product.inStock}
+              className="size-9 shrink-0 rounded-xl sm:size-10"
+              disabled={soldOut}
               aria-label="Choose options"
               title="Choose options"
               onClick={() => void navigate({ to: "/product/$productId", params: { productId: product.id } })}
@@ -107,8 +111,8 @@ export function ProductCard({ product }: { product: Product }) {
             <Button
               size="icon"
               variant="neon"
-              className="rounded-xl"
-              disabled={!product.inStock}
+              className="size-9 shrink-0 rounded-xl sm:size-10"
+              disabled={soldOut}
               aria-label="Add to cart"
               onClick={() => {
                 addToCart(product);
