@@ -33,12 +33,12 @@ const toneStyle = (t: Tone) =>
     "--toast-action-fg": "#111111",
   }) as CSSProperties;
 
-type State = { items: Notif[]; unread: number; loaded: boolean };
-let state: State = { items: [], unread: 0, loaded: false };
+type State = { items: Notif[]; unread: number; loaded: boolean; canDismiss: boolean };
+let state: State = { items: [], unread: 0, loaded: false, canDismiss: true };
 const listeners = new Set<() => void>();
 
 function setItems(items: Notif[], loaded = true) {
-  state = { items, unread: items.filter((n) => !n.read_at).length, loaded };
+  state = { items, unread: items.filter((n) => !n.read_at).length, loaded, canDismiss: state.canDismiss };
   listeners.forEach((l) => l());
 }
 
@@ -65,6 +65,26 @@ export async function markAllRead() {
   const now = new Date().toISOString();
   setItems(state.items.map((n) => (n.read_at ? n : { ...n, read_at: now })));
   await supabase.from("notifications").update({ read_at: now }).is("read_at", null);
+}
+
+export async function markUnread(id: string) {
+  setItems(state.items.map((n) => (n.id === id ? { ...n, read_at: null } : n)));
+  await supabase.from("notifications").update({ read_at: null }).eq("id", id);
+}
+
+/** Clear notifications from the list. They stay in the database until the nightly cleanup, so this can be undone. */
+export async function dismiss(ids: string[]) {
+  if (ids.length === 0) return;
+  setItems(state.items.filter((n) => !ids.includes(n.id)));
+  await supabase.from("notifications").update({ dismissed_at: new Date().toISOString() }).in("id", ids);
+}
+
+/** Undo a clear. */
+export async function restore(back: Notif[]) {
+  if (back.length === 0) return;
+  const merged = [...state.items, ...back.filter((b) => !state.items.some((n) => n.id === b.id))];
+  setItems(merged.sort((a, b) => b.created_at.localeCompare(a.created_at)));
+  await supabase.from("notifications").update({ dismissed_at: null }).in("id", back.map((b) => b.id));
 }
 
 export function timeAgo(iso: string) {
@@ -108,12 +128,21 @@ export function NotificationsHost() {
     let cancelled = false;
     void (async () => {
       try {
-        const { data } = await supabase
+        const cols = "id, kind, severity, title, body, link, read_at, created_at";
+        let res = await supabase
           .from("notifications")
-          .select("id, kind, severity, title, body, link, read_at, created_at")
+          .select(cols)
+          .is("dismissed_at", null)
           .order("created_at", { ascending: false })
           .limit(50);
-        if (!cancelled) setItems((data ?? []) as Notif[]);
+        if (res.error && /dismissed_at/.test(res.error.message)) {
+          // The database update that adds "clear notifications" has not been run yet: show everything, hide the clear actions.
+          state = { ...state, canDismiss: false };
+          res = await supabase.from("notifications").select(cols).order("created_at", { ascending: false }).limit(50);
+        } else if (!res.error) {
+          state = { ...state, canDismiss: true };
+        }
+        if (!cancelled) setItems((res.data ?? []) as Notif[]);
       } catch {
         if (!cancelled) setItems([]);
       }

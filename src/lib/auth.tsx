@@ -62,7 +62,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [sessionUserId, setSessionUserId] = useState<string | null>(null);
   const [sessionEmail, setSessionEmail] = useState("");
   const [sessionAnon, setSessionAnon] = useState(true);
-  const [ready, setReady] = useState(false);
+  const [sessionChecked, setReady] = useState(false);
+  const [profileFor, setProfileFor] = useState<string | null>(null);
   const [profileTick, setProfileTick] = useState(0);
 
   // Remove leftovers from the old localStorage demo login.
@@ -130,7 +131,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
     let cancelled = false;
-    setProfile(null);
+    // Keep the profile while it refreshes; only drop it when the account changes.
+    setProfile((p) => (p && p.id === sessionUserId ? p : null));
     void (async () => {
       try {
         const { data } = await supabase
@@ -147,13 +149,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           role: (data.role as Role) ?? "customer",
         });
       } catch {
-        if (!cancelled) setProfile(null);
+        if (!cancelled) setProfile((p) => (p && p.id === sessionUserId ? p : null));
+      } finally {
+        if (!cancelled) setProfileFor(sessionUserId);
       }
     })();
     return () => {
       cancelled = true;
     };
   }, [sessionUserId, sessionEmail, sessionAnon, profileTick]);
+
+  // "Ready" also waits for the profile (name and role) of a signed-in account. Without this, pages treat
+  // the person as signed out while the profile is still loading after a reload and send them away.
+  const needsProfile = Boolean(sessionUserId) && !sessionAnon;
+  const ready = sessionChecked && (!needsProfile || profileFor === sessionUserId);
 
   const signUp = useCallback<AuthValue["signUp"]>(async (d) => {
     const firstName = d.firstName.trim();
