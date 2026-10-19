@@ -23,6 +23,7 @@ import { useAuth } from "@/lib/auth";
 import { money } from "@/lib/products";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
+import { clearPersisted, usePersistedState } from "@/lib/persist";
 
 export const Route = createFileRoute("/admin/products")({
   head: () => ({
@@ -310,23 +311,22 @@ function ProductDialog({
   const { user } = useAuth();
   const existing = [...(product?.product_variants ?? [])].sort((a, b) => a.position - b.position);
 
-  const [form, setForm] = useState<Form>(() => toForm(cats, product, product ? costs[product.id] : undefined));
+  const [form, setForm] = usePersistedState<Form>(`moa:pe:${product?.id ?? "new"}:form`, () => toForm(cats, product, product ? costs[product.id] : undefined), { sync: true });
   const [errors, setErrors] = useState<Errors>({});
   const [formError, setFormError] = useState("");
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [urlInput, setUrlInput] = useState("");
 
-  const [specs, setSpecs] = useState<Spec[]>(() =>
-    (product?.specs ?? []).filter((s) => !/^(sku|category)$/i.test(s.label.trim())),
-  );
+  const [specs, setSpecs] = usePersistedState<Spec[]>(`moa:pe:${product?.id ?? "new"}:specs`, () =>
+    (product?.specs ?? []).filter((s) => !/^(sku|category)$/i.test(s.label.trim())), { sync: true });
 
-  const [hasOptions, setHasOptions] = useState(existing.length > 0);
-  const [opt1Name, setOpt1Name] = useState(product?.option1_name ?? "Size");
-  const [opt2Name, setOpt2Name] = useState(product?.option2_name ?? "Color");
-  const [opt1Values, setOpt1Values] = useState<string[]>(() => uniq(existing.map((v) => v.option1)));
-  const [opt2Values, setOpt2Values] = useState<string[]>(() => uniq(existing.map((v) => v.option2)));
-  const [swatches, setSwatches] = useState<Record<string, string>>(() => {
+  const [hasOptions, setHasOptions] = usePersistedState(`moa:pe:${product?.id ?? "new"}:hasOptions`, existing.length > 0, { sync: true });
+  const [opt1Name, setOpt1Name] = usePersistedState(`moa:pe:${product?.id ?? "new"}:opt1Name`, product?.option1_name ?? "Size", { sync: true });
+  const [opt2Name, setOpt2Name] = usePersistedState(`moa:pe:${product?.id ?? "new"}:opt2Name`, product?.option2_name ?? "Color", { sync: true });
+  const [opt1Values, setOpt1Values] = usePersistedState<string[]>(`moa:pe:${product?.id ?? "new"}:opt1Values`, () => uniq(existing.map((v) => v.option1)), { sync: true });
+  const [opt2Values, setOpt2Values] = usePersistedState<string[]>(`moa:pe:${product?.id ?? "new"}:opt2Values`, () => uniq(existing.map((v) => v.option2)), { sync: true });
+  const [swatches, setSwatches] = usePersistedState<Record<string, string>>(`moa:pe:${product?.id ?? "new"}:swatches`, () => {
     const m: Record<string, string> = {};
     for (const v of existing) {
       if (!v.swatch) continue;
@@ -334,8 +334,8 @@ function ProductDialog({
       if (isColorName(product?.option2_name ?? "") && v.option2) m[v.option2] = v.swatch;
     }
     return m;
-  });
-  const [variants, setVariants] = useState<Variant[]>(() =>
+  }, { sync: true });
+  const [variants, setVariants] = usePersistedState<Variant[]>(`moa:pe:${product?.id ?? "new"}:variants`, () =>
     existing.map((v) => ({
       id: v.id,
       option1: v.option1 ?? "",
@@ -345,8 +345,7 @@ function ProductDialog({
       stock: String(v.stock),
       image: v.image ?? "",
       swatch: v.swatch ?? "",
-    })),
-  );
+    })), { sync: true });
 
   // Keep one row per combination, and keep what was typed for combinations that stay.
   useEffect(() => {
@@ -992,11 +991,11 @@ function Products() {
   const [costs, setCosts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [q, setQ] = useState("");
-  const [cat, setCat] = useState("All");
-  const [view, setView] = useState<"active" | "archived" | "all">("active");
-  const [visible, setVisible] = useState(20);
-  const [dialog, setDialog] = useState<{ product?: Row | undefined } | null>(null);
+  const [q, setQ] = usePersistedState("moa:products:q", "");
+  const [cat, setCat] = usePersistedState("moa:products:cat", "All");
+  const [view, setView] = usePersistedState<"active" | "archived" | "all">("moa:products:view", "active");
+  const [visible, setVisible] = usePersistedState("moa:products:visible", 20);
+  const [dialog, setDialog] = usePersistedState<{ product?: Row | undefined } | null>("moa:products:dialog", null);
   const [confirm, setConfirm] = useState<Row | null>(null);
 
   const load = useCallback(async () => {
@@ -1243,7 +1242,10 @@ function Products() {
           cats={cats}
           rows={rows}
           costs={costs}
-          onClose={() => setDialog(null)}
+          onClose={() => {
+            clearPersisted(`moa:pe:${dialog.product?.id ?? "new"}:`);
+            setDialog(null);
+          }}
           onSaved={() => void load()}
         />
       )}

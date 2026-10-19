@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageHead, Panel } from "@/components/moa/ui";
 import { money } from "@/lib/products";
 import { supabase } from "@/lib/supabase";
+import { usePersistedState } from "@/lib/persist";
 
 export const Route = createFileRoute("/admin/inventory")({
   head: () => ({
@@ -42,9 +43,9 @@ function Inventory() {
   const [moves, setMoves] = useState<Movement[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [q, setQ] = useState("");
-  const [cat, setCat] = useState("All");
-  const [flt, setFlt] = useState<"all" | "attention" | "out" | "low">("all");
+  const [q, setQ] = usePersistedState("moa:inventory:q", "");
+  const [cat, setCat] = usePersistedState("moa:inventory:cat", "All");
+  const [flt, setFlt] = usePersistedState<"all" | "attention" | "out" | "low">("moa:inventory:filter", "all");
   const [editing, setEditing] = useState<string | null>(null);
   const [qty, setQty] = useState("");
   const [reason, setReason] = useState("");

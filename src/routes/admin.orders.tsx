@@ -7,6 +7,7 @@ import { useAuth } from "@/lib/auth";
 import { money } from "@/lib/products";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
+import { usePersistedState } from "@/lib/persist";
 
 export const Route = createFileRoute("/admin/orders")({
   head: () => ({
@@ -240,7 +241,7 @@ function Orders() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [shown, setShown] = useState<Record<string, boolean>>({});
-  const [flt, setFlt] = useState<Filter>("all");
+  const [flt, setFlt] = usePersistedState<Filter>("moa:orders:filter", "all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busyId, setBusyId] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { useNotifications } from "@/lib/notifications";
+import { clearPersisted } from "@/lib/persist";
 
 const item =
   "flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left font-body text-sm transition-colors hover:bg-secondary";
@@ -49,10 +50,10 @@ export function UserMenu({ variant, className }: { variant: "header" | "nav"; cl
           type="button"
           aria-label="Account"
           onClick={onClick}
-          className={cn(className, user && "text-primary")}
+          className={className}
         >
           <i className="bx bx-user text-2xl" />
-          {user && unread > 0 && <span className="absolute right-0 top-0 size-2.5 rounded-full bg-destructive" />}
+          {user && unread > 0 && <span className="absolute left-1/2 top-2 ml-1.5 size-2.5 rounded-full bg-destructive" />}
         </button>
       )}
 
@@ -70,9 +71,12 @@ export function UserMenu({ variant, className }: { variant: "header" | "nav"; cl
             <p className="truncate font-body text-xs text-muted-foreground">{user.email}</p>
           </div>
           <div className="my-1 h-px bg-border" />
-          <Link to="/account" onClick={() => setOpen(false)} className={item}>
-            <i className="bx bx-user-circle text-lg" /> Account
-          </Link>
+          {/* menu order: admin first */}
+          {isStaff && (
+            <Link to="/admin" onClick={() => setOpen(false)} className={item}>
+              <i className="bx bx-grid-alt text-lg" /> Admin
+            </Link>
+          )}
           <Link to="/orders" onClick={() => setOpen(false)} className={item}>
             <i className="bx bx-receipt text-lg" /> My orders
           </Link>
@@ -84,16 +88,15 @@ export function UserMenu({ variant, className }: { variant: "header" | "nav"; cl
               </span>
             )}
           </Link>
-          {isStaff && (
-            <Link to="/admin" onClick={() => setOpen(false)} className={item}>
-              <i className="bx bx-grid-alt text-lg" /> Admin
-            </Link>
-          )}
+          <Link to="/account" onClick={() => setOpen(false)} className={item}>
+            <i className="bx bx-user-circle text-lg" /> Account
+          </Link>
           <button
             type="button"
             className={item}
             onClick={() => {
               setOpen(false);
+              clearPersisted("moa:");
               logOut();
               navigate({ to: "/" });
             }}

@@ -15,6 +15,7 @@ import {
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useAuth } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
+import { usePersistedState } from "@/lib/persist";
 
 export const Route = createFileRoute("/admin/users")({
   head: () => ({ meta: [{ title: "Users — MOA Mart Suite" }] }),
@@ -218,8 +219,8 @@ function Users() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [q, setQ] = useState("");
-  const [roleFilter, setRoleFilter] = useState<"all" | Role>("all");
+  const [q, setQ] = usePersistedState("moa:users:q", "");
+  const [roleFilter, setRoleFilter] = usePersistedState<"all" | Role>("moa:users:role", "all");
   const [dialog, setDialog] = useState<{ user?: U | undefined } | null>(null);
   const [confirm, setConfirm] = useState<Confirm>(null);
 

@@ -10,6 +10,7 @@ import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { useSwipeDown } from "@/lib/swipe";
 import { useAppFrame, useIsMobile } from "@/lib/appFrame";
+import { usePersistedState } from "@/lib/persist";
 
 type Msg = {
   id: string;
@@ -56,7 +57,7 @@ export function SupportChat() {
   const unread = useChatUnread();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isMobile = useIsMobile();
-  const [text, setText] = useState("");
+  const [text, setText] = usePersistedState("moa:chat:draft", "");
   const [convId, setConvId] = useState<string | null>(null);
   const [msgs, setMsgs] = useState<Row[]>([]);
   const [sending, setSending] = useState(false);

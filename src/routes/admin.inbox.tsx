@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { PageHead } from "@/components/moa/ui";
 import { useAuth } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
+import { usePersistedState } from "@/lib/persist";
 
 export const Route = createFileRoute("/admin/inbox")({
   head: () => ({
@@ -41,9 +42,9 @@ const when = (iso: string) =>
 function Inbox() {
   const { user } = useAuth();
   const [convs, setConvs] = useState<Conv[]>([]);
-  const [activeId, setActiveId] = useState("");
+  const [activeId, setActiveId] = usePersistedState("moa:inbox:active", "");
   const [msgs, setMsgs] = useState<Msg[]>([]);
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = usePersistedState("moa:inbox:draft", "");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");

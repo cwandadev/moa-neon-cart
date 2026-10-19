@@ -7,6 +7,8 @@ import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { showWishlistToast } from "@/components/shop/wishToast";
 import { PRODUCTS, type Category, type Product } from "./products";
+import { usePersistedState } from "@/lib/persist";
+import { ScrollRestorer } from "@/components/ScrollRestorer";
 
 export type CartItem = { product: Product; qty: number };
 export type ChatMessage = { id: string; from: "client" | "staff"; text: string; at: string };
@@ -321,7 +323,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cartReady]);
-  const [cartOpen, setCartOpen] = useState(false);
+  const [cartOpen, setCartOpen] = usePersistedState("moa:cart:open", false);
   const [chatOpen, setChatOpen] = useState(false);
   const [products, setProducts] = useState<AdminProduct[]>(buildSeedProducts);
   const [productsLoaded, setProductsLoaded] = useState(false);
@@ -563,7 +565,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
   }, [wishlist, toggleWishlist, cart, addToCart, cartOpen, chatOpen, messages, products, orders, threads, toggleStock, updateStock, addProduct, updateProduct, deleteProduct, resetProducts, productsLoaded, addOrder, setOrderStatus, sendStaffMessage]);
 
-  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
+  return <StoreContext.Provider value={value}><ScrollRestorer />
+      {children}</StoreContext.Provider>;
 }
 
 export function useStore() {

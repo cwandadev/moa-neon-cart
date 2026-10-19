@@ -12,6 +12,7 @@ import { money, type Product } from "@/lib/products";
 import { useStore } from "@/lib/store";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
+import { usePersistedState } from "@/lib/persist";
 
 type Receipt = { code: string; total: number; payments: boolean };
 
@@ -28,10 +29,10 @@ export function CheckoutDialog({
   items: { product: Product; qty: number }[];
   buyNow?: boolean;
 }) {
-  const [form, setForm] = useState(emptyForm);
+  const [form, setForm] = usePersistedState(`moa:checkout:${buyNow ? "buy" : "cart"}:form`, emptyForm, { sync: true });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [receipt, setReceipt] = useState<Receipt | null>(null);
+  const [receipt, setReceipt] = usePersistedState<Receipt | null>(`moa:checkout:${buyNow ? "buy" : "cart"}:receipt`, null, { sync: true });
   const [showItems, setShowItems] = useState(false);
   const { ensureSession, user } = useAuth();
   const { clearCart, setCartOpen } = useStore();

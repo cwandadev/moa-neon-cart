@@ -334,3 +334,13 @@
     background-color: #000000;
   }
 }
+
+/* moa-perf-modal: while a panel or dialog is open the page behind it is dimmed, so the browser can skip the blur effects. */
+body[data-scroll-locked] * {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+/* Sliding panels get their own layer so the animation runs on the graphics chip. */
+[role="dialog"][data-state="open"], [role="dialog"][data-state="closed"] {
+  will-change: transform, opacity;
+}

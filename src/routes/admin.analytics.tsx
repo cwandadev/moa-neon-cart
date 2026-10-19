@@ -14,6 +14,7 @@ import {
 import { Kpi, PageHead, Panel } from "@/components/moa/ui";
 import { money } from "@/lib/products";
 import { supabase } from "@/lib/supabase";
+import { usePersistedState } from "@/lib/persist";
 
 export const Route = createFileRoute("/admin/analytics")({
   head: () => ({
@@ -54,7 +55,7 @@ const compact = (v: number) =>
 const tip = { background: "#0a0a0a", border: "1px solid #262626", borderRadius: 12, fontSize: 12 };
 
 function Analytics() {
-  const [days, setDays] = useState<Range>(30);
+  const [days, setDays] = usePersistedState<Range>("moa:analytics:days", 30);
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
