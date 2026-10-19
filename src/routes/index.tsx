@@ -5,6 +5,7 @@ import { FilterBar, defaultFilters, type Filters } from "@/components/shop/Filte
 import { ProductCard } from "@/components/shop/ProductCard";
 import { CATEGORIES, type Product } from "@/lib/products";
 import { fetchCatalog, fetchCategoryNames, fetchPriceBounds } from "@/lib/catalog";
+import { usePersistedState } from "@/lib/persist";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -29,10 +30,10 @@ const roundDown5k = (n: number) => Math.floor(n / 5000) * 5000;
 const roundUp5k = (n: number) => Math.ceil(n / 5000) * 5000;
 
 function Catalog() {
-  const [query, setQuery] = useState("");
-  const [debounced, setDebounced] = useState("");
+  const [query, setQuery] = usePersistedState("moa:home:query", "");
+  const [debounced, setDebounced] = usePersistedState("moa:home:debounced", "");
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [filters, setFilters] = useState<Filters>(defaultFilters);
+  const [filters, setFilters] = usePersistedState<Filters>("moa:home:filters", defaultFilters);
   const [bounds, setBounds] = useState<{ min: number; max: number } | null>(null);
   const [categories, setCategories] = useState<string[]>(CATEGORIES);
   const [items, setItems] = useState<Product[]>([]);

@@ -10,10 +10,11 @@ import { cn } from "@/lib/utils";
 import { SheetGrabber } from "@/components/shop/SheetGrabber";
 import { CheckoutDialog } from "./CheckoutDialog";
 import { EditOptionsDialog } from "./EditOptionsDialog";
+import { usePersistedState } from "@/lib/persist";
 
 export function CartDrawer() {
   const { cart, cartOpen, setCartOpen, removeFromCart, setQty, cartTotal, addToCart } = useStore();
-  const [checkout, setCheckout] = useState(false);
+  const [checkout, setCheckout] = usePersistedState("moa:cart:checkout", false);
   const [editing, setEditing] = useState<(typeof cart)[number] | null>(null);
   const isMobile = useIsMobile();
   const navigate = useNavigate();
@@ -86,7 +87,8 @@ export function CartDrawer() {
                         <img
                           src={item.product.images[0]}
                           alt=""
-                          className="size-[72px] rounded-xl object-cover"
+                          decoding="async"
+          className="size-[72px] rounded-xl object-cover"
                         />
                       </Link>
                       <div className="flex min-w-0 flex-1 flex-col">

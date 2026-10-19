@@ -92,7 +92,32 @@ export type CatalogQuery = {
   offset: number;
 };
 
+const DEPTH_PREFIX = "moa:catalog-depth:";
+const depthKey = (q: CatalogQuery) =>
+  DEPTH_PREFIX +
+  JSON.stringify([q.search.trim(), [...q.categories].sort(), q.minPrice, q.maxPrice, q.inStockOnly, q.minRating, q.sort]);
+const readDepth = (key: string): number => {
+  if (typeof window === "undefined") return 0;
+  try {
+    return Number(window.sessionStorage.getItem(key)) || 0;
+  } catch {
+    return 0;
+  }
+};
+const saveDepth = (key: string, n: number) => {
+  if (typeof window === "undefined") return;
+  try {
+    const prev = Number(window.sessionStorage.getItem(key)) || 0;
+    window.sessionStorage.setItem(key, String(Math.max(prev, n)));
+  } catch {
+    /* ignore */
+  }
+};
+
 export async function fetchCatalog(q: CatalogQuery): Promise<{ items: Product[]; total: number }> {
+  const dKey = depthKey(q);
+  // The first page loads as many items as were already loaded, so a reload or "back" lands on the same place.
+  const limit = q.offset === 0 ? Math.min(60, Math.max(q.limit, readDepth(dKey))) : q.limit;
   const { data, error } = await supabase.rpc("catalog_products", {
     p_search: q.search.trim() || null,
     p_categories: q.categories.length ? q.categories : null,
@@ -101,15 +126,14 @@ export async function fetchCatalog(q: CatalogQuery): Promise<{ items: Product[];
     p_in_stock: q.inStockOnly,
     p_min_rating: q.minRating > 0 ? q.minRating : null,
     p_sort: q.sort,
-    p_limit: q.limit,
+    p_limit: limit,
     p_offset: q.offset,
   });
   if (error) throw new Error(error.message);
   const payload = data as { total: number; items: ProductRow[] };
-  return {
-    total: payload?.total ?? 0,
-    items: (payload?.items ?? []).map(rowToProduct),
-  };
+  const items = (payload?.items ?? []).map(rowToProduct);
+  saveDepth(dKey, q.offset + items.length);
+  return { total: payload?.total ?? 0, items };
 }
 
 /** Single published product with its options (works from SSR loader and client navigation). */

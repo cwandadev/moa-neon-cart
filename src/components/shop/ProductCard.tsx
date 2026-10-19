@@ -43,6 +43,7 @@ export function ProductCard({ product }: { product: Product }) {
         <img
           src={product.images[0]}
           alt={product.name}
+          decoding="async"
           loading="lazy"
           className={cn("h-full w-full object-cover", soldOut && "opacity-60")}
         />

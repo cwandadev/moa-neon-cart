@@ -1,8 +1,9 @@
 import { createFileRoute, Link, Outlet, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { useAdminAlerts, type Alert, type AdminAlerts, type Level } from "@/lib/adminAlerts";
 import { UnreadBadge } from "@/components/notifications/UnreadBadge";
+import { supabase } from "@/lib/supabase";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({
@@ -66,12 +67,35 @@ function AlertDot({ alert }: { alert: Alert | undefined }) {
 }
 
 function AdminLayout() {
-  const { user, ready, isStaff, isAdmin } = useAuth();
+  const { user, ready, isStaff, isAdmin, refreshProfile } = useAuth();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const alerts = useAdminAlerts(ready && isStaff);
+  // After a reload the login is ready a moment before the role is known. Do not send anyone away until
+  // the database has confirmed they really are not staff.
+  const refreshRef = useRef(refreshProfile);
+  refreshRef.current = refreshProfile;
   useEffect(() => {
-    if (ready && !isStaff) navigate({ to: user ? "/" : "/login" });
+    if (!ready || isStaff) return;
+    let cancelled = false;
+    void (async () => {
+      const { data } = await supabase.auth.getSession();
+      const uid = data.session?.user.id;
+      if (!uid) {
+        if (!cancelled) navigate({ to: "/login" });
+        return;
+      }
+      const { data: p } = await supabase.from("profiles").select("role").eq("id", uid).maybeSingle();
+      if (cancelled) return;
+      if (p?.role === "staff" || p?.role === "admin") {
+        await refreshRef.current();
+        return;
+      }
+      navigate({ to: "/" });
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [ready, isStaff, user, navigate]);
   if (!ready || !isStaff) return null;
 

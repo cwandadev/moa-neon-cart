@@ -3,12 +3,14 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CheckoutDialog } from "@/components/shop/CheckoutDialog";
 import { Header } from "@/components/shop/Header";
 import { Button } from "@/components/ui/button";
+import { useIsMobile } from "@/lib/appFrame";
 import { fetchProduct } from "@/lib/catalog";
 import { money, type Product } from "@/lib/products";
 import { useStore } from "@/lib/store";
 import { OptionGroup } from "@/components/shop/OptionPicker";
-import { findVariant, lineProductFor, optionValues, variantLabel } from "@/lib/variants";
+import { findVariant, lineProductFor, optionValues } from "@/lib/variants";
 import { cn } from "@/lib/utils";
+import { usePersistedState } from "@/lib/persist";
 
 export const Route = createFileRoute("/product/$productId")({
   loader: ({ params }) => fetchProduct(params.productId).then((product) => ({ product })),
@@ -87,6 +89,7 @@ function Accordion({
 
 function ProductView({ product }: { product: Product }) {
   const { addToCart, toggleWishlist, isWished, setCartOpen, setChatOpen } = useStore();
+  const isMobile = useIsMobile();
   const variants = product.variants ?? [];
   const name1 = product.optionNames?.[0] ?? "";
   const name2 = product.optionNames?.[1] ?? "";
@@ -94,13 +97,12 @@ function ProductView({ product }: { product: Product }) {
   const values1 = optionValues(variants, 1);
   const values2 = name2 ? optionValues(variants, 2) : [];
 
-  const [sel1, setSel1] = useState(values1.length === 1 ? (values1[0] ?? "") : "");
-  const [sel2, setSel2] = useState(values2.length === 1 ? (values2[0] ?? "") : "");
-  const [qty, setQty] = useState(1);
+  const [sel1, setSel1] = usePersistedState(`moa:pp:${product.id}:sel1`, values1.length === 1 ? (values1[0] ?? "") : "");
+  const [sel2, setSel2] = usePersistedState(`moa:pp:${product.id}:sel2`, values2.length === 1 ? (values2[0] ?? "") : "");
+  const [qty, setQty] = usePersistedState(`moa:pp:${product.id}:qty`, 1);
   const [showError, setShowError] = useState(false);
   const [active, setActive] = useState(0);
-  const [checkout, setCheckout] = useState(false);
-  const [ctaVisible, setCtaVisible] = useState(true);
+  const [checkout, setCheckout] = usePersistedState(`moa:pp:${product.id}:checkout`, false);
   const trackRef = useRef<HTMLDivElement | null>(null);
   const optionsRef = useRef<HTMLDivElement | null>(null);
   const ctaRef = useRef<HTMLDivElement | null>(null);
@@ -146,14 +148,6 @@ function ProductView({ product }: { product: Product }) {
     if (i >= 0) scrollToImage(i);
   }, [selected?.id]);
 
-  useEffect(() => {
-    const el = ctaRef.current;
-    if (!el || typeof IntersectionObserver === "undefined") return;
-    const io = new IntersectionObserver((entries) => setCtaVisible(Boolean(entries[0]?.isIntersecting)));
-    io.observe(el);
-    return () => io.disconnect();
-  }, []);
-
   const needChoice = () => {
     setShowError(true);
     optionsRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -197,8 +191,8 @@ function ProductView({ product }: { product: Product }) {
   return (
     <div className="min-h-screen bg-background">
       <Header />
-      <main className="mx-auto w-full max-w-7xl px-4 pb-40 pt-5 sm:px-6 md:pb-16">
-        <nav className="mb-4 font-body text-xs text-muted-foreground">
+      <main className="mx-auto w-full max-w-7xl px-4 pb-28 pt-3 sm:px-6 md:pb-16 md:pt-5">
+        <nav className="mb-3 font-body text-xs text-muted-foreground md:mb-4">
           <Link to="/" className="hover:text-primary">
             Shop
           </Link>
@@ -206,13 +200,13 @@ function ProductView({ product }: { product: Product }) {
           <span>{String(product.category)}</span>
         </nav>
 
-        <div className="grid gap-8 lg:grid-cols-2 lg:gap-12">
+        <div className="grid gap-5 lg:grid-cols-2 lg:gap-12">
           <div>
             <div className="relative">
               <div
                 ref={trackRef}
                 onScroll={onScroll}
-                className="flex snap-x snap-mandatory overflow-x-auto rounded-3xl bg-muted [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                className="flex snap-x snap-mandatory overflow-x-auto rounded-2xl bg-muted md:rounded-3xl [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
               >
                 {images.map((u, i) => (
                   <img
@@ -220,20 +214,31 @@ function ProductView({ product }: { product: Product }) {
                     src={u}
                     alt={i === 0 ? product.name : ""}
                     loading={i === 0 ? "eager" : "lazy"}
-                    className="aspect-[4/5] w-full shrink-0 snap-center object-cover md:aspect-square"
+                    className="aspect-square max-h-[52svh] w-full shrink-0 snap-center object-cover md:max-h-none"
                   />
                 ))}
               </div>
-              {discount > 0 && (
+              {discount > 0 && totalStock > 0 && (
                 <span className="absolute left-3 top-3 rounded-full bg-destructive px-2.5 py-1 font-body text-xs font-semibold text-white">
                   -{discount}%
                 </span>
               )}
               {totalStock <= 0 && (
-                <span className="absolute right-3 top-3 rounded-full bg-background/90 px-3 py-1 font-body text-xs font-semibold text-destructive">
+                <span className="absolute left-3 top-3 rounded-full bg-background/90 px-3 py-1 font-body text-xs font-semibold text-destructive">
                   Sold out
                 </span>
               )}
+              <button
+                type="button"
+                aria-label={wished ? "Remove from wishlist" : "Add to wishlist"}
+                onClick={() => toggleWishlist(product.id)}
+                className={cn(
+                  "absolute right-3 top-3 grid size-10 place-items-center rounded-full border border-border bg-background/90 md:hidden",
+                  wished ? "text-accent" : "text-muted-foreground",
+                )}
+              >
+                <i className={cn("text-2xl", wished ? "bx bxs-heart" : "bx bx-heart")} />
+              </button>
               {images.length > 1 && (
                 <>
                   <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 gap-1.5 rounded-full bg-background/70 px-2.5 py-1.5">
@@ -287,11 +292,11 @@ function ProductView({ product }: { product: Product }) {
             <p className="font-body text-xs uppercase tracking-[0.2em] text-muted-foreground">
               {String(product.category)}
             </p>
-            <h1 className="mt-1 font-display text-2xl font-semibold leading-tight sm:text-3xl">{product.name}</h1>
+            <h1 className="mt-1 font-display text-xl font-semibold leading-tight sm:text-3xl">{product.name}</h1>
             {product.blurb && <p className="mt-2 font-body text-sm text-muted-foreground">{product.blurb}</p>}
 
-            <div className="mt-4 flex flex-wrap items-baseline gap-3">
-              <span className="font-display text-3xl font-semibold">{money(price)}</span>
+            <div className="mt-3 flex flex-wrap items-baseline gap-3 md:mt-4">
+              <span className="font-display text-2xl font-semibold sm:text-3xl">{money(price)}</span>
               {showOld && product.oldPrice && (
                 <span className="font-body text-base text-muted-foreground line-through">{money(product.oldPrice)}</span>
               )}
@@ -302,7 +307,7 @@ function ProductView({ product }: { product: Product }) {
             </p>
 
             {hasOptions && (
-              <div ref={optionsRef} className="mt-6 grid gap-5">
+              <div ref={optionsRef} className="mt-5 grid gap-4 md:mt-6 md:gap-5">
                 <OptionGroup
                   name={name1}
                   which={1}
@@ -336,9 +341,9 @@ function ProductView({ product }: { product: Product }) {
               </div>
             )}
 
-            <div ref={ctaRef} className="mt-6 grid gap-3">
+            <div ref={ctaRef} className="mt-5 grid gap-2.5 md:mt-6 md:gap-3">
               <div className="flex gap-3">
-                <div className="flex h-12 items-center rounded-xl border border-border">
+                <div className="flex h-11 items-center rounded-xl border border-border md:h-12">
                   <button
                     type="button"
                     aria-label="Decrease quantity"
@@ -362,7 +367,7 @@ function ProductView({ product }: { product: Product }) {
                 <Button
                   variant="neon"
                   size="lg"
-                  className="h-12 flex-1 rounded-xl text-base"
+                  className="h-11 flex-1 rounded-xl text-base md:h-12"
                   disabled={soldOut && complete}
                   onClick={add}
                 >
@@ -373,7 +378,7 @@ function ProductView({ product }: { product: Product }) {
                   aria-label={wished ? "Remove from wishlist" : "Add to wishlist"}
                   onClick={() => toggleWishlist(product.id)}
                   className={cn(
-                    "grid size-12 shrink-0 place-items-center rounded-xl border border-border transition-colors",
+                    "hidden size-12 shrink-0 place-items-center rounded-xl border border-border transition-colors md:grid",
                     wished ? "text-accent" : "text-muted-foreground hover:text-foreground",
                   )}
                 >
@@ -383,7 +388,7 @@ function ProductView({ product }: { product: Product }) {
               <Button
                 variant="glass"
                 size="lg"
-                className="h-12 rounded-xl"
+                className="h-11 rounded-xl md:h-12"
                 disabled={soldOut && complete}
                 onClick={buyNow}
               >
@@ -398,13 +403,13 @@ function ProductView({ product }: { product: Product }) {
               </button>
             </div>
 
-            <div className="mt-8 border-t border-border">
+            <div className="mt-6 border-t border-border md:mt-8">
               {product.description && (
                 <Accordion title="Description" defaultOpen>
                   <p className="whitespace-pre-line">{product.description}</p>
                 </Accordion>
               )}
-              <Accordion title="Specifications" defaultOpen>
+              <Accordion key={String(isMobile)} title="Specifications" defaultOpen={!isMobile}>
                 <dl className="grid divide-y divide-border">
                   {specRows.map((r) => (
                     <div key={r.label} className="flex justify-between gap-4 py-2.5 first:pt-0 last:pb-0">
@@ -428,25 +433,6 @@ function ProductView({ product }: { product: Product }) {
           </div>
         </div>
       </main>
-
-      {!ctaVisible && (
-        <div className="fixed inset-x-3 bottom-[5.25rem] z-30 flex items-center gap-3 rounded-2xl border border-border bg-card p-3 shadow-[0_20px_50px_-20px_black] md:hidden">
-          <div className="min-w-0 flex-1">
-            <p className="font-display text-lg font-semibold leading-tight text-primary">{money(price)}</p>
-            <p className="truncate font-body text-[11px] text-muted-foreground">
-              {selected ? variantLabel(selected) : product.name}
-            </p>
-          </div>
-          <Button
-            variant="neon"
-            className="h-11 shrink-0 rounded-xl px-5"
-            disabled={soldOut && complete}
-            onClick={add}
-          >
-            {soldOut && complete ? "Sold out" : complete ? "Add to cart" : missingText || "Choose options"}
-          </Button>
-        </div>
-      )}
 
       <CheckoutDialog open={checkout} onOpenChange={setCheckout} items={[{ product: lineProduct(), qty }]} buyNow />
     </div>
