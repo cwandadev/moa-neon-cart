@@ -12,7 +12,7 @@ const json = (body: unknown, status = 200) =>
     headers: { ...cors, "Content-Type": "application/json" },
   });
 
-const BASE = Deno.env.get("PAWAPAY_BASE_URL") ?? "https://api.sandbox.pawapay.io"\;
+const BASE = Deno.env.get("PAWAPAY_BASE_URL") ?? "https://api.sandbox.pawapay.io";
 const PROVIDERS = ["MTN_MOMO_RWA", "AIRTEL_RWA"];
 const clip = (v: unknown, max: number) => String(v ?? "").trim().slice(0, max);
 
@@ -55,6 +55,17 @@ async function pawa(path: string, init?: RequestInit) {
   return { ok: res.ok, status: res.status, data };
 }
 
+// Ask PawaPay which network a number belongs to. Returns null when it cannot tell.
+async function detectProvider(phone: string): Promise<string | null> {
+  try {
+    const r = await pawa("/v2/predict-provider", { method: "POST", body: JSON.stringify({ phoneNumber: phone }) });
+    const p = r.data?.provider;
+    return r.ok && PROVIDERS.includes(p) ? p : null;
+  } catch {
+    return null;
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -81,7 +92,7 @@ Deno.serve(async (req) => {
     }
     const action = String(body?.action ?? "pay");
 
-    // 2. Clean the number and guess the provider, so the checkout can preselect it.
+    // 2. Clean the number and guess the provider (used by the retry screen).
     if (action === "predict") {
       const phone = normalizePhone(body.phone);
       if (!phone) return json({ error: "Enter a valid Rwandan phone number." }, 400);
@@ -95,11 +106,19 @@ Deno.serve(async (req) => {
 
     // 3. Pay an order. The amount comes from the order, never from the browser.
     const code = clip(body.order_code, 40).toUpperCase();
-    const provider = String(body.provider ?? "");
+    const hint = String(body.provider ?? "");
     const phone = normalizePhone(body.phone);
     if (!code) return json({ error: "Missing order number" }, 400);
-    if (!PROVIDERS.includes(provider)) return json({ error: "Choose MTN or Airtel." }, 400);
     if (!phone) return json({ error: "Enter a valid Rwandan phone number." }, 400);
+
+    // The network comes from PawaPay. The screen's own guess (if any) is only a fallback.
+    const provider = (await detectProvider(phone)) ?? (PROVIDERS.includes(hint) ? hint : "");
+    if (!provider) {
+      return json(
+        { error: "We could not tell which network this number is on. Check the number: only MTN and Airtel numbers can be used." },
+        400,
+      );
+    }
 
     const { data: order } = await admin
       .from("orders")
