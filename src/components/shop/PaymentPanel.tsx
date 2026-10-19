@@ -50,27 +50,36 @@ export function PaymentPanel({
   total,
   defaultPhone,
   onPaid,
+  onEnded,
+  initialError,
+  defaultProvider,
   compact = false,
 }: {
   code: string;
   total: number;
   defaultPhone?: string;
   onPaid?: () => void;
+  /** Called once when the time to pay has ended or the order was cancelled. */
+  onEnded?: () => void;
+  /** A message to show first, for example when starting the payment did not work. */
+  initialError?: string;
+  defaultProvider?: Provider | null;
   /** Hide the amount row when the surrounding screen already shows the order and total. */
   compact?: boolean;
 }) {
   const { user } = useAuth();
   const [phase, setPhase] = useState<Phase>("loading");
-  const [provider, setProvider] = useState<Provider | null>(null);
+  const [provider, setProvider] = useState<Provider | null>(defaultProvider ?? null);
   const [phone, setPhone] = useState(defaultPhone ?? "");
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useState(initialError ?? "");
   const [reservedUntil, setReservedUntil] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const userPicked = useRef(false);
   const lastPredicted = useRef("");
   const waitStart = useRef(0);
   const paidFired = useRef(false);
+  const endedFired = useRef(false);
 
   const applyStatus = useCallback((s: StatusResp) => {
     setReservedUntil(s.order.reserved_until);
@@ -180,6 +189,13 @@ export function PaymentPanel({
       onPaid?.();
     }
   }, [phase, onPaid]);
+
+  useEffect(() => {
+    if ((phase === "expired" || phase === "cancelled") && !endedFired.current) {
+      endedFired.current = true;
+      onEnded?.();
+    }
+  }, [phase, onEnded]);
 
   const pay = async () => {
     setError("");
