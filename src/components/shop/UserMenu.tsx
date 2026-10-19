@@ -39,11 +39,16 @@ export function UserMenu({ variant, className }: { variant: "header" | "nav"; cl
         <Button
           variant="glass"
           size="icon"
-          className={cn("rounded-xl", user && "text-primary")}
-          aria-label="Account"
+          className={cn("relative rounded-xl", user && "text-primary")}
+          aria-label={user && unread > 0 ? `Account, ${unread} unread notifications` : "Account"}
           onClick={onClick}
         >
           <i className="bx bx-user text-xl" />
+          {user && unread > 0 && (
+            <span className="absolute -right-1.5 -top-1.5 grid h-5 min-w-5 animate-in zoom-in-50 place-items-center rounded-full bg-destructive px-1 text-[10px] font-semibold text-white duration-200">
+              {unread > 9 ? "9+" : unread}
+            </span>
+          )}
         </Button>
       ) : (
         <button

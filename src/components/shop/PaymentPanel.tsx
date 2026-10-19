@@ -1,49 +1,18 @@
-import { FunctionsHttpError } from "@supabase/supabase-js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/lib/auth";
+import { callFn, guessProvider, normalizePhone, PROVIDERS, type Provider } from "@/lib/momo";
 import { money } from "@/lib/products";
 import { supabase } from "@/lib/supabase";
-import { cn } from "@/lib/utils";
 
-type Provider = "MTN_MOMO_RWA" | "AIRTEL_RWA";
 type Phase = "loading" | "form" | "starting" | "waiting" | "paid" | "expired" | "cancelled";
 type StatusResp = {
   phase: "idle" | "waiting" | "paid" | "failed" | "expired" | "cancelled";
   order: { reserved_until: string | null; provider: string | null };
   message: string | null;
 };
-
-const PROVIDERS: { id: Provider; label: string; logo: string }[] = [
-  { id: "MTN_MOMO_RWA", label: "MTN MoMo", logo: "https://static-content.pawapay.io/company_logos/mtn.png" },
-  { id: "AIRTEL_RWA", label: "Airtel Money", logo: "https://static-content.pawapay.io/company_logos/airtel.png" },
-];
-
-function normalize(raw: string): string | null {
-  let d = raw.replace(/\D/g, "");
-  if (d.startsWith("0")) d = "250" + d.slice(1);
-  else if (d.length === 9) d = "250" + d;
-  return /^250\d{9}$/.test(d) ? d : null;
-}
-
-async function callFn<T>(name: string, body: Record<string, unknown>): Promise<{ data?: T; error?: string }> {
-  const { data, error } = await supabase.functions.invoke<T>(name, { body });
-  if (error) {
-    let msg = "Something went wrong. Please try again.";
-    if (error instanceof FunctionsHttpError) {
-      try {
-        const b = await error.context.json();
-        if (b?.error) msg = String(b.error);
-      } catch {
-        /* keep the generic message */
-      }
-    }
-    return { error: msg };
-  }
-  return { data: data as T };
-}
 
 export function PaymentPanel({
   code,
@@ -75,8 +44,6 @@ export function PaymentPanel({
   const [notice, setNotice] = useState(initialError ?? "");
   const [reservedUntil, setReservedUntil] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const userPicked = useRef(false);
-  const lastPredicted = useRef("");
   const waitStart = useRef(0);
   const paidFired = useRef(false);
   const endedFired = useRef(false);
@@ -144,22 +111,6 @@ export function PaymentPanel({
     };
   }, [user, phone]);
 
-  // Guess MTN or Airtel from the number, unless the customer already picked one.
-  useEffect(() => {
-    if (phase !== "form") return;
-    const n = normalize(phone);
-    if (!n || n === lastPredicted.current) return;
-    const t = window.setTimeout(() => {
-      lastPredicted.current = n;
-      void (async () => {
-        const r = await callFn<{ provider: Provider | null }>("create-payment", { action: "predict", phone: n });
-        const pv = r.data?.provider;
-        if (pv && !userPicked.current) setProvider(pv);
-      })();
-    }, 600);
-    return () => window.clearTimeout(t);
-  }, [phone, phase]);
-
   // One-second clock for the countdown.
   useEffect(() => {
     if (phase !== "waiting" && phase !== "form") return;
@@ -199,20 +150,17 @@ export function PaymentPanel({
 
   const pay = async () => {
     setError("");
-    const n = normalize(phone);
-    if (!provider) {
-      setError("Choose MTN or Airtel.");
-      return;
-    }
+    const n = normalizePhone(phone);
     if (!n) {
       setError("Enter a valid Rwandan phone number.");
       return;
     }
     setPhase("starting");
+    const g = guessProvider(phone);
     const r = await callFn<{ status: string }>("create-payment", {
       action: "pay",
       order_code: code,
-      provider,
+      ...(g ? { provider: g } : {}),
       phone: n,
     });
     if (r.error) {
@@ -229,7 +177,7 @@ export function PaymentPanel({
 
   const remaining = reservedUntil ? Math.max(0, Math.floor((new Date(reservedUntil).getTime() - now) / 1000)) : 0;
   const clock = `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, "0")}`;
-  const providerLabel = PROVIDERS.find((p) => p.id === provider)?.label ?? "mobile money";
+  const providerLabel = PROVIDERS.find((p) => p.id === (provider ?? guessProvider(phone)))?.label ?? "mobile money";
   const waited = phase === "waiting" && waitStart.current ? Math.floor((now - waitStart.current) / 1000) : 0;
   const windowOver = phase === "form" && reservedUntil !== null && remaining === 0;
 
@@ -329,39 +277,7 @@ export function PaymentPanel({
       {notice && <p className="font-body text-sm text-destructive">{notice}</p>}
 
       <div className="grid gap-2">
-        <Label>Pay with</Label>
-        <div className="grid grid-cols-2 gap-2">
-          {PROVIDERS.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => {
-                userPicked.current = true;
-                setProvider(p.id);
-              }}
-              className={cn(
-                "flex items-center justify-center gap-2 rounded-xl border px-3 py-3 font-body text-sm transition-colors",
-                provider === p.id
-                  ? "border-primary bg-primary/10 text-foreground"
-                  : "border-border text-muted-foreground hover:border-primary/40",
-              )}
-            >
-              <img
-                src={p.logo}
-                alt=""
-                className="h-5 w-auto"
-                onError={(e) => {
-                  e.currentTarget.style.display = "none";
-                }}
-              />
-              {p.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="grid gap-2">
-        <Label htmlFor="pay-phone">Mobile money number</Label>
+        <Label htmlFor="pay-phone">Phone number</Label>
         <div className="flex gap-2">
           <span className="grid h-11 place-items-center rounded-xl border border-border bg-muted/40 px-3 font-body text-sm text-muted-foreground">
             +250
@@ -370,10 +286,7 @@ export function PaymentPanel({
             id="pay-phone"
             inputMode="tel"
             value={phone}
-            onChange={(e) => {
-              userPicked.current = false;
-              setPhone(e.target.value);
-            }}
+            onChange={(e) => setPhone(e.target.value)}
             placeholder="0783 456 789"
             className="h-11 min-w-0 flex-1 rounded-xl text-base"
           />
@@ -387,7 +300,7 @@ export function PaymentPanel({
         variant="neon"
         size="lg"
         className="h-12 rounded-xl text-base"
-        disabled={phase === "starting" || windowOver || !provider || !normalize(phone)}
+        disabled={phase === "starting" || windowOver || !normalizePhone(phone)}
         onClick={() => void pay()}
       >
         {phase === "starting" ? "Sending request…" : `Pay ${money(total)}`}

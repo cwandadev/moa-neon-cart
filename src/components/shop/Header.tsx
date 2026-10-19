@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useStore } from "@/lib/store";
 import { UserMenu } from "@/components/shop/UserMenu";
-import { NotificationBell } from "@/components/shop/NotificationBell";
 
 export function Header({
   query,
@@ -61,10 +60,6 @@ export function Header({
               </Badge>
             )}
           </Button>
-          <Button variant="glass" size="icon" className="relative rounded-xl max-md:hidden" aria-label="My orders" onClick={() => navigate({ to: "/orders" })}>
-            <i className="bx bx-receipt text-xl" />
-          </Button>
-          <NotificationBell />
           <UserMenu variant="header" />
         </div>
       </div>

@@ -315,7 +315,7 @@ export function CheckoutFlow({
                 </button>
                 {useOther && (
                   <div className="grid gap-2 pt-1">
-                    <Label htmlFor="co-momo">Mobile money number</Label>
+                    <Label htmlFor="co-momo">Phone number</Label>
                     <div className="flex gap-2">
                       <span className="grid h-11 place-items-center rounded-xl border border-border bg-muted/40 px-3 font-body text-sm text-muted-foreground sm:h-10">
                         +250
