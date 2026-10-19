@@ -344,3 +344,17 @@ body[data-scroll-locked] * {
 [role="dialog"][data-state="open"], [role="dialog"][data-state="closed"] {
   will-change: transform, opacity;
 }
+
+/* moa-sheet-up: dialogs on phones slide up from the bottom like a sheet. */
+@keyframes moa-sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+@keyframes moa-sheet-down {
+  from { transform: translateY(0); }
+  to { transform: translateY(100%); }
+}
+@media (max-width: 639px) {
+  .moa-sheet[data-state="open"] { animation: moa-sheet-up 240ms cubic-bezier(0.22, 1, 0.36, 1) both !important; }
+  .moa-sheet[data-state="closed"] { animation: moa-sheet-down 180ms ease-in both !important; }
+}

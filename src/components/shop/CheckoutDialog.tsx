@@ -1,6 +1,6 @@
 import { FunctionsHttpError } from "@supabase/supabase-js";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PaymentPanel } from "@/components/shop/PaymentPanel";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -8,11 +8,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAppFrame, useIsMobile } from "@/lib/appFrame";
 import { useAuth } from "@/lib/auth";
+import { usePersistedState } from "@/lib/persist";
 import { money, type Product } from "@/lib/products";
 import { useStore } from "@/lib/store";
+import { useSwipeDown } from "@/lib/swipe";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
-import { usePersistedState } from "@/lib/persist";
 
 type Receipt = { code: string; total: number; payments: boolean };
 
@@ -29,16 +30,25 @@ export function CheckoutDialog({
   items: { product: Product; qty: number }[];
   buyNow?: boolean;
 }) {
-  const [form, setForm] = usePersistedState(`moa:checkout:${buyNow ? "buy" : "cart"}:form`, emptyForm, { sync: true });
+  const kind = buyNow ? "buy" : "cart";
+  const [form, setForm] = usePersistedState(`moa:checkout:${kind}:form`, emptyForm, { sync: true });
+  const [receipt, setReceipt] = usePersistedState<Receipt | null>(`moa:checkout:${kind}:receipt`, null, {
+    sync: true,
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [receipt, setReceipt] = usePersistedState<Receipt | null>(`moa:checkout:${buyNow ? "buy" : "cart"}:receipt`, null, { sync: true });
   const [showItems, setShowItems] = useState(false);
+  const [paid, setPaid] = useState(false);
   const { ensureSession, user } = useAuth();
   const { clearCart, setCartOpen } = useStore();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const frame = useAppFrame(open && isMobile);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const swipe = useSwipeDown(
+    () => close(false),
+    () => panelRef.current,
+  );
 
   // Display total only: the server re-prices every item from the database.
   const total = items.reduce((s, i) => s + i.qty * i.product.price, 0);
@@ -70,16 +80,24 @@ export function CheckoutDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, user]);
+  }, [open, user, setForm]);
 
   const close = (v: boolean) => {
     if (!v && receipt) {
       setReceipt(null);
       setForm(emptyForm);
+      setPaid(false);
       setCartOpen(false);
     }
     setError("");
     onOpenChange(v);
+  };
+
+  const goTrack = () => {
+    if (!receipt) return;
+    const code = receipt.code;
+    close(false);
+    void navigate({ to: "/orders/$orderId", params: { orderId: code } });
   };
 
   const submit = async () => {
@@ -141,65 +159,128 @@ export function CheckoutDialog({
   const field = "h-11 text-base sm:h-10 sm:text-sm";
   const heading = "font-display text-[11px] font-semibold uppercase tracking-wider text-muted-foreground";
 
+  const done = Boolean(receipt && (paid || !receipt.payments));
+  const title = !receipt ? "Checkout" : done ? "Order confirmed" : "Pay for your order";
+  const step = !receipt
+    ? "Step 1 of 2 · Delivery details"
+    : done
+      ? "Thank you for your order"
+      : "Step 2 of 2 · Pay with mobile money";
+
+  // On phones the dialog is a bottom sheet that is only as tall as its content.
+  // When the keyboard is open it sits right above it.
+  const visibleHeight =
+    typeof window !== "undefined" && frame ? Math.max(0, window.innerHeight - frame.top - frame.bottom) : 0;
+
   return (
     <Dialog open={open} onOpenChange={close}>
       <DialogContent
-        className="flex flex-col gap-0 overflow-hidden border-border bg-card p-0 max-sm:rounded-2xl sm:max-h-[90vh] sm:max-w-lg"
+        ref={panelRef}
+        className="moa-sheet flex flex-col gap-0 overflow-hidden border-border bg-card p-0 max-sm:rounded-b-none max-sm:rounded-t-3xl sm:max-h-[90vh] sm:max-w-lg"
         style={
-          isMobile && frame
+          isMobile
             ? {
-                left: 12,
-                right: 12,
-                top: frame.top,
-                bottom: frame.bottom,
-                width: "auto",
+                left: 0,
+                right: 0,
+                top: "auto",
+                bottom: frame?.keyboard ? frame.bottom : 0,
+                width: "100%",
                 maxWidth: "none",
-                maxHeight: "none",
+                maxHeight: frame?.keyboard ? `${Math.max(240, visibleHeight - 8)}px` : "92dvh",
                 transform: "none",
                 translate: "none",
-                animation: "none",
               }
             : undefined
         }
       >
-        <DialogHeader className="shrink-0 border-b border-border px-5 py-4 pr-14 text-left">
-          <DialogTitle className="text-lg">
-            {receipt ? (receipt.payments ? "Pay for your order" : "Order received") : "Checkout"}
-          </DialogTitle>
-          <DialogDescription className="font-body text-xs">
-            {receipt
-              ? receipt.payments
-                ? "Your order is saved. Pay with mobile money to confirm it."
-                : "Your order is saved and waiting for payment."
-              : "Enter your delivery details. You pay with MTN MoMo or Airtel Money in the next step."}
-          </DialogDescription>
-        </DialogHeader>
+        <div {...swipe} className="shrink-0 touch-none">
+          <span className="mx-auto mt-2 block h-1 w-10 rounded-full bg-muted-foreground/40 sm:hidden" />
+          <DialogHeader className="gap-0.5 px-5 pb-3 pr-16 pt-3 text-left sm:pt-5">
+            <DialogTitle className="text-lg">{title}</DialogTitle>
+            <DialogDescription className="font-body text-xs">{step}</DialogDescription>
+          </DialogHeader>
+        </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-border px-5 py-4">
           {receipt ? (
             <div className="grid gap-4">
-              <div className="grid gap-2 rounded-xl border border-border bg-muted/40 p-3 font-body text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Order number</span>
-                  <span className="font-medium">{receipt.code}</span>
+              <div className="flex items-center justify-between rounded-2xl border border-border bg-muted/40 px-4 py-3 font-body">
+                <div>
+                  <p className="text-[11px] text-muted-foreground">Order</p>
+                  <p className="text-sm font-medium">{receipt.code}</p>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Total</span>
-                  <span className="font-medium text-primary">{money(receipt.total)}</span>
+                <div className="text-right">
+                  <p className="text-[11px] text-muted-foreground">Total</p>
+                  <p className="font-display text-base font-semibold text-primary">{money(receipt.total)}</p>
                 </div>
-                {!receipt.payments && (
-                  <p className="text-muted-foreground">
-                    Online payment with MTN MoMo and Airtel Money is coming soon. Keep your order number, you will
-                    be able to pay it as soon as payments open.
-                  </p>
-                )}
               </div>
-              {receipt.payments && (
-                <PaymentPanel code={receipt.code} total={receipt.total} defaultPhone={form.phone} />
+              {receipt.payments ? (
+                <PaymentPanel
+                  code={receipt.code}
+                  total={receipt.total}
+                  defaultPhone={form.phone}
+                  onPaid={() => setPaid(true)}
+                  compact
+                />
+              ) : (
+                <p className="font-body text-sm text-muted-foreground">
+                  Online payment with MTN MoMo and Airtel Money is coming soon. Keep your order number, you will be
+                  able to pay it as soon as payments open.
+                </p>
+              )}
+              {!done && (
+                <button
+                  type="button"
+                  onClick={goTrack}
+                  className="py-1 text-center font-body text-sm text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  Pay later and track this order
+                </button>
               )}
             </div>
           ) : (
             <div className="grid gap-5">
+              <section className="rounded-2xl border border-border bg-muted/40">
+                <button
+                  type="button"
+                  onClick={() => setShowItems((v) => !v)}
+                  className="flex w-full items-center gap-3 p-3 text-left"
+                >
+                  <span className="flex shrink-0">
+                    {items.slice(0, 3).map((i, n) => (
+                      <img
+                        key={i.product.id}
+                        src={i.product.images[0]}
+                        alt=""
+                        decoding="async"
+                        className={cn("size-10 rounded-lg object-cover ring-2 ring-card", n > 0 && "-ml-3")}
+                      />
+                    ))}
+                  </span>
+                  <span className="min-w-0 flex-1 font-body text-sm">
+                    {count} {count === 1 ? "item" : "items"}
+                    <span className="block text-[11px] text-muted-foreground">
+                      {showItems ? "Hide the list" : "Tap to see the list"}
+                    </span>
+                  </span>
+                  <span className="font-display text-sm font-semibold">{money(total)}</span>
+                  <i className={cn("bx text-lg text-muted-foreground", showItems ? "bx-chevron-up" : "bx-chevron-down")} />
+                </button>
+                {showItems && (
+                  <div className="border-t border-border px-3 py-2 font-body text-sm">
+                    {items.map((i) => (
+                      <div key={i.product.id} className="flex justify-between gap-3 py-0.5">
+                        <span className="min-w-0 truncate text-muted-foreground">
+                          {i.product.name}
+                          {i.product.variantLabel ? ` (${i.product.variantLabel})` : ""} × {i.qty}
+                        </span>
+                        <span className="shrink-0">{money(i.product.price * i.qty)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+
               <section className="grid gap-3">
                 <h3 className={heading}>Contact</h3>
                 <div className="grid gap-2">
@@ -209,6 +290,7 @@ export function CheckoutDialog({
                     value={form.name}
                     onChange={(e) => setForm({ ...form, name: e.target.value })}
                     placeholder="Alice Uwase"
+                    autoComplete="name"
                     className={field}
                   />
                 </div>
@@ -221,6 +303,7 @@ export function CheckoutDialog({
                     value={form.phone}
                     onChange={(e) => setForm({ ...form, phone: e.target.value })}
                     placeholder="+250 78..."
+                    autoComplete="tel"
                     className={field}
                   />
                 </div>
@@ -235,87 +318,48 @@ export function CheckoutDialog({
                     value={form.location}
                     onChange={(e) => setForm({ ...form, location: e.target.value })}
                     placeholder="Kigali, Kimihurura — KG 7 Ave"
+                    autoComplete="street-address"
                     className={field}
                   />
-                  <p className="font-body text-xs text-muted-foreground">We call your phone number if we need directions.</p>
-                </div>
-              </section>
-
-              <section className="grid gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowItems((v) => !v)}
-                  className="flex items-center justify-between rounded-xl border border-border bg-muted/40 px-3 py-2.5 text-left font-body text-sm sm:pointer-events-none"
-                >
-                  <span>
-                    Order summary · {count} {count === 1 ? "item" : "items"}
-                  </span>
-                  <i
-                    className={cn(
-                      "bx text-lg text-muted-foreground sm:hidden",
-                      showItems ? "bx-chevron-up" : "bx-chevron-down",
-                    )}
-                  />
-                </button>
-                <div
-                  className={cn(
-                    "rounded-xl border border-border bg-muted/40 p-3 font-body text-sm",
-                    !showItems && "max-sm:hidden",
-                  )}
-                >
-                  {items.map((i) => (
-                    <div key={i.product.id} className="flex justify-between gap-3 py-0.5">
-                      <span className="min-w-0 truncate text-muted-foreground">
-                        {i.product.name}{i.product.variantLabel ? ` (${i.product.variantLabel})` : ""} × {i.qty}
-                      </span>
-                      <span className="shrink-0">{money(i.product.price * i.qty)}</span>
-                    </div>
-                  ))}
+                  <p className="font-body text-xs text-muted-foreground">
+                    We call your phone number if we need directions.
+                  </p>
                 </div>
               </section>
             </div>
           )}
         </div>
 
-        <div className="shrink-0 border-t border-border bg-card px-5 py-3 max-sm:pb-4">
-          {receipt ? (
-            <div className="grid grid-cols-2 gap-2">
-              <Button
-                variant="glass"
-                size="lg"
-                onClick={() => {
-                  const code = receipt.code;
-                  close(false);
-                  void navigate({ to: "/orders/$orderId", params: { orderId: code } });
-                }}
-              >
-                Track order
-              </Button>
-              <Button variant="neon" size="lg" onClick={() => close(false)}>
-                Done
-              </Button>
-            </div>
-          ) : (
-            <>
-              {error && <p className="mb-2 font-body text-sm text-destructive">{error}</p>}
-              <div className="flex items-center gap-3">
-                <div className="shrink-0">
-                  <p className="font-body text-[11px] text-muted-foreground">Total</p>
-                  <p className="font-display text-lg font-semibold leading-tight text-primary">{money(total)}</p>
-                </div>
+        {(!receipt || done) && (
+          <div className="shrink-0 border-t border-border bg-card px-5 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3">
+            {receipt ? (
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant="neon" size="lg" className="h-12 rounded-xl" onClick={goTrack}>
+                  Track order
+                </Button>
+                <Button variant="glass" size="lg" className="h-12 rounded-xl" onClick={() => close(false)}>
+                  Continue shopping
+                </Button>
+              </div>
+            ) : (
+              <>
+                {error && <p className="mb-2 font-body text-sm text-destructive">{error}</p>}
                 <Button
                   variant="neon"
                   size="lg"
-                  className="flex-1"
+                  className="h-12 w-full rounded-xl text-base"
                   disabled={!valid || busy}
                   onClick={() => void submit()}
                 >
-                  {busy ? "Placing order…" : "Place order"}
+                  {busy ? "Placing order…" : `Place order · ${money(total)}`}
                 </Button>
-              </div>
-            </>
-          )}
-        </div>
+                <p className="mt-2 text-center font-body text-[11px] text-muted-foreground">
+                  You pay with MTN MoMo or Airtel Money in the next step.
+                </p>
+              </>
+            )}
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );

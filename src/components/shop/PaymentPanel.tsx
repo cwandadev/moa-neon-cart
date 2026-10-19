@@ -50,11 +50,14 @@ export function PaymentPanel({
   total,
   defaultPhone,
   onPaid,
+  compact = false,
 }: {
   code: string;
   total: number;
   defaultPhone?: string;
   onPaid?: () => void;
+  /** Hide the amount row when the surrounding screen already shows the order and total. */
+  compact?: boolean;
 }) {
   const { user } = useAuth();
   const [phase, setPhase] = useState<Phase>("loading");
@@ -220,12 +223,12 @@ export function PaymentPanel({
 
   if (phase === "paid") {
     return (
-      <div className="grid gap-2 py-2 text-center">
-        <div className="mx-auto grid size-14 place-items-center rounded-full bg-success/15 text-success">
+      <div className="grid justify-items-center gap-2 py-4 text-center">
+        <div className="grid size-14 place-items-center rounded-full bg-success/15 text-success">
           <i className="bx bx-check text-3xl" />
         </div>
         <p className="font-display text-lg font-semibold">Payment received</p>
-        <p className="font-body text-sm text-muted-foreground">
+        <p className="max-w-[18rem] font-body text-sm text-muted-foreground">
           Thank you! Order {code} is paid. We will confirm it shortly.
         </p>
       </div>
@@ -234,14 +237,14 @@ export function PaymentPanel({
 
   if (phase === "expired" || phase === "cancelled") {
     return (
-      <div className="grid gap-2 py-2 text-center">
-        <div className="mx-auto grid size-14 place-items-center rounded-full bg-warning/15 text-warning">
+      <div className="grid justify-items-center gap-2 py-4 text-center">
+        <div className="grid size-14 place-items-center rounded-full bg-warning/15 text-warning">
           <i className="bx bx-time-five text-3xl" />
         </div>
         <p className="font-display text-lg font-semibold">
           {phase === "expired" ? "The time to pay has ended" : "This order was cancelled"}
         </p>
-        <p className="font-body text-sm text-muted-foreground">
+        <p className="max-w-[18rem] font-body text-sm text-muted-foreground">
           {phase === "expired"
             ? "The items were released. Please place a new order. If money left your account, message us in the chat and quote "
             : "You cannot pay for it any more. If money left your account, message us in the chat and quote "}
@@ -253,12 +256,12 @@ export function PaymentPanel({
 
   if (phase === "waiting") {
     return (
-      <div className="grid gap-3 py-2 text-center">
-        <div className="mx-auto grid size-14 place-items-center rounded-full bg-info/15 text-info">
+      <div className="grid justify-items-center gap-3 py-3 text-center">
+        <div className="grid size-14 place-items-center rounded-full bg-info/15 text-info">
           <i className="bx bx-mobile-alt animate-pulse text-3xl" />
         </div>
         <p className="font-display text-lg font-semibold">Check your phone</p>
-        <p className="font-body text-sm text-muted-foreground">
+        <p className="max-w-[18rem] font-body text-sm text-muted-foreground">
           Approve the payment of {money(total)} with your {providerLabel} PIN.
         </p>
         {remaining > 0 ? (
@@ -290,13 +293,18 @@ export function PaymentPanel({
 
   return (
     <div className="grid gap-4">
-      <div className="flex items-center justify-between rounded-xl border border-border bg-muted/40 p-3 font-body text-sm">
-        <span className="text-muted-foreground">Amount to pay</span>
-        <span className="font-semibold text-primary">{money(total)}</span>
-      </div>
+      {!compact && (
+        <div className="flex items-center justify-between rounded-xl border border-border bg-muted/40 p-3 font-body text-sm">
+          <span className="text-muted-foreground">Amount to pay</span>
+          <span className="font-semibold text-primary">{money(total)}</span>
+        </div>
+      )}
       {reservedUntil && remaining > 0 && (
-        <p className="font-body text-xs text-muted-foreground">
-          Pay within <span className="text-warning">{clock}</span> to keep your items reserved.
+        <p className="flex items-center gap-2 rounded-xl bg-warning/10 px-3 py-2 font-body text-xs text-warning">
+          <i className="bx bx-time-five text-base" />
+          <span>
+            Pay within <span className="font-semibold">{clock}</span> to keep your items reserved.
+          </span>
         </p>
       )}
       {windowOver && (
@@ -339,7 +347,7 @@ export function PaymentPanel({
       <div className="grid gap-2">
         <Label htmlFor="pay-phone">Mobile money number</Label>
         <div className="flex gap-2">
-          <span className="grid h-10 place-items-center rounded-xl border border-border bg-muted/40 px-3 font-body text-sm text-muted-foreground">
+          <span className="grid h-11 place-items-center rounded-xl border border-border bg-muted/40 px-3 font-body text-sm text-muted-foreground">
             +250
           </span>
           <Input
@@ -351,7 +359,7 @@ export function PaymentPanel({
               setPhone(e.target.value);
             }}
             placeholder="0783 456 789"
-            className="h-10 rounded-xl"
+            className="h-11 min-w-0 flex-1 rounded-xl text-base"
           />
         </div>
         <p className="font-body text-xs text-muted-foreground">This number gets the approval prompt.</p>
@@ -362,6 +370,7 @@ export function PaymentPanel({
       <Button
         variant="neon"
         size="lg"
+        className="h-12 rounded-xl text-base"
         disabled={phase === "starting" || windowOver || !provider || !normalize(phone)}
         onClick={() => void pay()}
       >
