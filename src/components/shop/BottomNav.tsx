@@ -75,10 +75,7 @@ export function BottomNav() {
             aria-label="Home"
             aria-current={homeOn ? "page" : undefined}
             onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-            className={cn(
-              "grid size-16 place-items-center overflow-hidden rounded-full ring-1 ring-primary/40 transition-transform active:scale-95",
-              homeOn && "ring-2 ring-primary",
-            )}
+            className="grid size-16 place-items-center overflow-hidden rounded-full transition-transform active:scale-95"
           >
             <img src="/logo.svg" alt="" className="size-full object-cover" />
           </Link>

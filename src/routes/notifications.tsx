@@ -8,6 +8,7 @@ import { useAuth } from "@/lib/auth";
 import {
   dismiss,
   markAllRead,
+  markMany,
   markRead,
   markUnread,
   restore,
@@ -17,6 +18,9 @@ import {
   type Notif,
 } from "@/lib/notifications";
 import { usePersistedState } from "@/lib/persist";
+import { SelectCheck, SelectionBar, SelectionStrip } from "@/components/shop/SelectionBar";
+import { useLongPress } from "@/lib/longPress";
+import { notificationSelectionActions } from "@/lib/selection";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/notifications")({
@@ -89,30 +93,56 @@ function Row({
   onOpen,
   onToggle,
   onDelete,
+  selecting,
+  picked,
+  onPick,
+  onStartSelect,
 }: {
   n: Notif;
   canDismiss: boolean;
   onOpen: (n: Notif) => void;
   onToggle: (n: Notif) => void;
   onDelete: (n: Notif) => void;
+  selecting: boolean;
+  picked: boolean;
+  onPick: (id: string) => void;
+  onStartSelect: (id: string) => void;
 }) {
   const t = SEV[n.severity] ?? SEV.info;
   const unread = !n.read_at;
   const toggleText = unread ? "Mark as read" : "Mark as unread";
+  const lp = useLongPress(() => onStartSelect(n.id), !selecting);
+  // The click that follows a long press must not open the notification.
+  const open = () => {
+    if (lp.consumeLongPress()) return;
+    onOpen(n);
+  };
   return (
     <li
+      {...lp.handlers}
       className={cn(
         "group rounded-2xl border p-4 transition-colors",
         unread ? cn(t.border, t.bg) : "border-border bg-card/40",
+        selecting && "select-none",
+        picked && "border-primary bg-primary/5 ring-1 ring-primary",
       )}
     >
       <div className="flex gap-3">
-        <span className={cn("grid size-10 shrink-0 place-items-center rounded-full", t.bg, t.text)}>
-          <i className={`bx ${t.icon} text-xl`} />
-        </span>
+        {selecting ? (
+          <SelectCheck
+            checked={picked}
+            onToggle={() => onPick(n.id)}
+            label={`Select notification: ${n.title}`}
+            className="-ml-1"
+          />
+        ) : (
+          <span className={cn("grid size-10 shrink-0 place-items-center rounded-full", t.bg, t.text)}>
+            <i className={`bx ${t.icon} text-xl`} />
+          </span>
+        )}
         <div className="min-w-0 flex-1">
           <div className="flex items-start gap-2">
-            <button type="button" onClick={() => onOpen(n)} className="min-w-0 flex-1 text-left">
+            <button type="button" onClick={open} className="min-w-0 flex-1 text-left">
               <p
                 className={cn(
                   "font-display text-sm leading-snug",
@@ -126,13 +156,13 @@ function Row({
             {unread && <span aria-label="Unread" className="mt-1.5 size-2 shrink-0 rounded-full bg-primary" />}
           </div>
 
-          <div className="mt-2 flex items-center justify-between gap-2">
+          <div className={cn("mt-2 flex items-center justify-between gap-2", selecting && "pointer-events-none opacity-40")}>
             <span className="font-body text-[11px] text-muted-foreground">{timeAgo(n.created_at)}</span>
             <div className="flex items-center gap-1">
               {n.link && (
                 <button
                   type="button"
-                  onClick={() => onOpen(n)}
+                  onClick={open}
                   className="rounded-lg px-2.5 py-1.5 font-body text-xs font-medium text-primary transition-colors hover:bg-primary/10"
                 >
                   {actionLabel(n)}
@@ -212,23 +242,48 @@ function Card({
   onOpen,
   onToggle,
   onDelete,
+  selecting,
+  picked,
+  onPick,
+  onStartSelect,
 }: {
   n: Notif;
   canDismiss: boolean;
   onOpen: (n: Notif) => void;
   onToggle: (n: Notif) => void;
   onDelete: (n: Notif) => void;
+  selecting: boolean;
+  picked: boolean;
+  onPick: (id: string) => void;
+  onStartSelect: (id: string) => void;
 }) {
   const t = SEV[n.severity] ?? SEV.info;
   const unread = !n.read_at;
   const toggleText = unread ? "Mark as read" : "Mark as unread";
+  const lp = useLongPress(() => onStartSelect(n.id), !selecting);
+  // The click that follows a long press must not open the notification.
+  const open = () => {
+    if (lp.consumeLongPress()) return;
+    onOpen(n);
+  };
   return (
     <li
+      {...lp.handlers}
       className={cn(
-        "group flex min-h-[11.5rem] flex-col rounded-2xl border p-5 transition-all hover:-translate-y-0.5",
+        "group relative flex min-h-[11.5rem] flex-col rounded-2xl border p-5 transition-all hover:-translate-y-0.5",
         unread ? cn(t.border, t.bg) : "border-border bg-card/40 hover:border-primary/40",
+        selecting && "select-none",
+        picked && "border-primary bg-primary/5 ring-2 ring-primary",
       )}
     >
+      {!selecting && (
+        <SelectCheck
+          checked={false}
+          onToggle={() => onStartSelect(n.id)}
+          label={`Select notification: ${n.title}`}
+          className="absolute right-1 top-1 z-10 hidden opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:hover)]:grid"
+        />
+      )}
       <div className="flex items-start gap-3">
         <span className={cn("grid size-12 shrink-0 place-items-center rounded-2xl", t.bg, t.text)}>
           <i className={`bx ${t.icon} text-2xl`} />
@@ -239,10 +294,19 @@ function Card({
           </p>
           <p className="font-body text-xs text-muted-foreground">{timeAgo(n.created_at)}</p>
         </div>
-        {unread && <span aria-label="Unread" className="mt-1 size-2.5 shrink-0 rounded-full bg-primary" />}
+        {selecting ? (
+          <SelectCheck
+            checked={picked}
+            onToggle={() => onPick(n.id)}
+            label={`Select notification: ${n.title}`}
+            className="-mr-2 -mt-2"
+          />
+        ) : (
+          unread && <span aria-label="Unread" className="mt-1 size-2.5 shrink-0 rounded-full bg-primary" />
+        )}
       </div>
 
-      <button type="button" onClick={() => onOpen(n)} className="mt-4 text-left">
+      <button type="button" onClick={open} className="mt-4 text-left">
         <p
           className={cn(
             "font-display text-base leading-snug",
@@ -254,11 +318,11 @@ function Card({
         {n.body && <p className="mt-1.5 line-clamp-3 font-body text-sm text-muted-foreground">{n.body}</p>}
       </button>
 
-      <div className="mt-auto flex items-center justify-between gap-2 pt-4">
+      <div className={cn("mt-auto flex items-center justify-between gap-2 pt-4", selecting && "pointer-events-none opacity-40")}>
         {n.link ? (
           <button
             type="button"
-            onClick={() => onOpen(n)}
+            onClick={open}
             className="-ml-2.5 flex items-center gap-1 rounded-lg px-2.5 py-1.5 font-body text-sm font-medium text-primary transition-colors hover:bg-primary/10"
           >
             {actionLabel(n)} <i className="bx bx-right-arrow-alt text-lg" />
@@ -266,7 +330,7 @@ function Card({
         ) : (
           <span />
         )}
-        <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+        <div className="flex items-center gap-0.5 transition-opacity group-focus-within:opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100">
           <button
             type="button"
             aria-label={toggleText}
@@ -299,6 +363,31 @@ function NotificationsPage() {
   const { items, unread, loaded, canDismiss } = useNotifications();
   const [filter, setFilter] = usePersistedState<Filter>("moa:notifs:filter", "all");
   const [clearAllOpen, setClearAllOpen] = useState(false);
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(() => new Set());
+  const stopSelect = () => {
+    setSelecting(false);
+    setPicked(new Set());
+  };
+
+  // Leave selection mode with Escape, and forget notifications that are gone.
+  useEffect(() => {
+    if (!selecting) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setSelecting(false);
+        setPicked(new Set());
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selecting]);
+  useEffect(() => {
+    setPicked((prev) => {
+      const keep = new Set([...prev].filter((id) => items.some((n) => n.id === id)));
+      return keep.size === prev.size ? prev : keep;
+    });
+  }, [items]);
 
   useEffect(() => {
     if (ready && !user) void navigate({ to: "/login" });
@@ -333,6 +422,31 @@ function NotificationsPage() {
   if (!ready || !user) return null;
 
   const readItems = items.filter((n) => n.read_at);
+
+  // Selection: what the chosen notifications allow.
+  const selectedRows = items.filter((n) => picked.has(n.id));
+  const { markRead: toRead, markUnread: toUnread, deletable } = notificationSelectionActions(selectedRows, canDismiss);
+  const toggleOne = (id: string) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const startSelect = (id?: string) => {
+    setSelecting(true);
+    if (id) setPicked(new Set([id]));
+  };
+  const pickMany = (list: Notif[]) => setPicked(new Set(list.map((n) => n.id)));
+  const markSelected = (list: Notif[], read: boolean) => {
+    const ids = list.map((n) => n.id);
+    if (ids.length === 0) return;
+    void markMany(ids, read);
+    stopSelect();
+    toast(`Marked ${ids.length} as ${read ? "read" : "unread"}`, {
+      action: { label: "Undo", onClick: () => void markMany(ids, !read) },
+    });
+  };
 
   const open = (n: Notif) => {
     void markRead(n.id);
@@ -390,7 +504,7 @@ function NotificationsPage() {
   return (
     <div className="min-h-screen bg-background">
       <Header />
-      <main className="mx-auto w-full max-w-6xl px-4 pb-28 pt-6 sm:px-6 lg:pb-14 lg:pt-8">
+      <main className={cn("mx-auto w-full max-w-6xl px-4 pt-6 sm:px-6 lg:pt-8", selecting ? "pb-48 lg:pb-32" : "pb-28 lg:pb-14")}>
         <div className="lg:grid lg:grid-cols-[16rem_minmax(0,1fr)] lg:items-start lg:gap-10">
           <aside className="lg:sticky lg:top-28">
             <div className="flex items-start justify-between gap-3">
@@ -400,9 +514,20 @@ function NotificationsPage() {
                   {unread > 0 ? `${unread} unread` : "You are all caught up"}
                 </p>
               </div>
-              {/* Phones: actions in a menu */}
-              <div className="lg:hidden">
-                <Menu label="Notification actions">{() => actions}</Menu>
+              <div className="flex items-center gap-1">
+                {items.length > 0 && (
+                  <Button
+                    variant={selecting ? "neon" : "glass"}
+                    className="h-10 rounded-xl px-4"
+                    onClick={() => (selecting ? stopSelect() : startSelect())}
+                  >
+                    {selecting ? "Done" : "Select"}
+                  </Button>
+                )}
+                {/* Phones: actions in a menu */}
+                <div className="lg:hidden">
+                  <Menu label="Notification actions">{() => actions}</Menu>
+                </div>
               </div>
             </div>
 
@@ -446,10 +571,32 @@ function NotificationsPage() {
           </aside>
 
           <section className="mt-5 min-w-0 lg:mt-0">
+            {selecting && items.length > 0 && (
+              <SelectionStrip
+                noun="notifications"
+                total={filtered.length}
+                picked={picked.size}
+                onToggleAll={() => pickMany(picked.size >= filtered.length ? [] : filtered)}
+                options={[
+                  { label: "All in this view", count: filtered.length, onPick: () => pickMany(filtered) },
+                  {
+                    label: "Unread",
+                    count: filtered.filter((n) => !n.read_at).length,
+                    onPick: () => pickMany(filtered.filter((n) => !n.read_at)),
+                  },
+                  {
+                    label: "Read",
+                    count: filtered.filter((n) => n.read_at).length,
+                    onPick: () => pickMany(filtered.filter((n) => n.read_at)),
+                  },
+                  { label: "None", count: picked.size, onPick: () => pickMany([]) },
+                ]}
+              />
+            )}
             {!loaded ? (
-              <ul className="grid gap-3 lg:grid-cols-2 lg:gap-4">
+              <ul className="grid gap-3 md:grid-cols-2 md:gap-4">
                 {[0, 1, 2, 3].map((i) => (
-                  <li key={i} className="h-24 animate-pulse rounded-2xl border border-border bg-card/40 lg:h-48" />
+                  <li key={i} className="h-24 animate-pulse rounded-2xl border border-border bg-card/40 md:h-48" />
                 ))}
               </ul>
             ) : items.length === 0 ? (
@@ -480,25 +627,33 @@ function NotificationsPage() {
                     <h2 className="mb-2 font-display text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                       {g.label}
                     </h2>
-                    <ul className="grid gap-2.5 lg:hidden">
+                    <ul className="grid gap-2.5 md:hidden">
                       {g.rows.map((n) => (
                         <Row
                           key={n.id}
                           n={n}
                           canDismiss={canDismiss}
-                          onOpen={open}
+                          onOpen={selecting ? (x) => toggleOne(x.id) : open}
+                          selecting={selecting}
+                          picked={picked.has(n.id)}
+                          onPick={toggleOne}
+                          onStartSelect={startSelect}
                           onToggle={toggle}
                           onDelete={(x) => remove([x], "Notification deleted")}
                         />
                       ))}
                     </ul>
-                    <ul className="hidden gap-4 lg:grid lg:grid-cols-2">
+                    <ul className="hidden gap-4 md:grid md:grid-cols-2">
                       {g.rows.map((n) => (
                         <Card
                           key={n.id}
                           n={n}
                           canDismiss={canDismiss}
-                          onOpen={open}
+                          onOpen={selecting ? (x) => toggleOne(x.id) : open}
+                          selecting={selecting}
+                          picked={picked.has(n.id)}
+                          onPick={toggleOne}
+                          onStartSelect={startSelect}
                           onToggle={toggle}
                           onDelete={(x) => remove([x], "Notification deleted")}
                         />
@@ -514,6 +669,33 @@ function NotificationsPage() {
           </section>
         </div>
       </main>
+
+      {selecting && picked.size > 0 && (
+        <SelectionBar count={picked.size} onExit={stopSelect}>
+          {toRead.length > 0 && (
+            <Button variant="glass" className="h-11 rounded-xl" onClick={() => markSelected(toRead, true)}>
+              Mark read {toRead.length}
+            </Button>
+          )}
+          {toUnread.length > 0 && (
+            <Button variant="glass" className="h-11 rounded-xl" onClick={() => markSelected(toUnread, false)}>
+              Mark unread {toUnread.length}
+            </Button>
+          )}
+          {deletable.length > 0 && (
+            <Button
+              variant="destructive"
+              className="h-11 rounded-xl"
+              onClick={() => {
+                remove(deletable, `Deleted ${deletable.length}`);
+                stopSelect();
+              }}
+            >
+              Delete {deletable.length}
+            </Button>
+          )}
+        </SelectionBar>
+      )}
 
       <ConfirmDialog
         open={clearAllOpen}

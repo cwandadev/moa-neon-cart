@@ -8,6 +8,8 @@ import { ProductCard } from "@/components/shop/ProductCard";
 import { Button } from "@/components/ui/button";
 import { fetchProduct, rowToProduct, type ProductRow } from "@/lib/catalog";
 import { usePersistedState } from "@/lib/persist";
+import { categorySlug } from "@/lib/categories";
+import { breadcrumbLd, jsonLd, productDescription, productLd, seoMeta } from "@/lib/seo";
 import { money, type Product } from "@/lib/products";
 import { useStore } from "@/lib/store";
 import { supabase } from "@/lib/supabase";
@@ -23,12 +25,22 @@ export const Route = createFileRoute("/product/$productId")({
     }
     const title = `${product.name} — MOA Mart`;
     return {
-      meta: [
-        { title },
-        { name: "description", content: product.blurb },
-        { property: "og:title", content: title },
-        { property: "og:description", content: product.blurb },
-        { property: "og:image", content: product.images[0] ?? "" },
+      ...seoMeta({
+        title,
+        description: productDescription(product),
+        path: `/product/${product.id}`,
+        image: product.images[0],
+        type: "product",
+      }),
+      scripts: [
+        jsonLd(productLd(product)),
+        jsonLd(
+          breadcrumbLd([
+            { name: "Home", path: "/" },
+            { name: String(product.category), path: `/shop/${categorySlug(String(product.category))}` },
+            { name: product.name, path: `/product/${product.id}` },
+          ]),
+        ),
       ],
     };
   },
@@ -260,7 +272,13 @@ function ProductView({ product }: { product: Product }) {
             Shop
           </Link>
           <span className="mx-1.5">/</span>
-          <span>{String(product.category)}</span>
+          <Link
+            to="/shop/$category"
+            params={{ category: categorySlug(String(product.category)) }}
+            className="hover:text-primary"
+          >
+            {String(product.category)}
+          </Link>
           <span className="mx-1.5">/</span>
           <span className="text-foreground/80">{product.name}</span>
         </nav>

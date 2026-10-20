@@ -17,6 +17,8 @@ type Msg = {
   sender_role: "client" | "staff" | "system";
   body: string;
   created_at: string;
+  /** The agent's first name, saved by the database on staff replies. */
+  sender_name?: string | null;
 };
 
 type Row = Msg & { local?: "sending" | "failed" };
@@ -34,6 +36,49 @@ const dayLabel = (iso: string) => {
 
 const hhmm = (iso: string) =>
   new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+
+/** The agent who replied last (null while nobody with a name has replied). */
+const currentAgent = (list: { sender_role: string; sender_name?: string | null }[]): string | null => {
+  for (let i = list.length - 1; i >= 0; i--) {
+    const m = list[i];
+    if (m && m.sender_role === "staff" && m.sender_name) return m.sender_name;
+  }
+  return null;
+};
+
+/** The replies where a different agent takes over from the one before. */
+const agentJoins = (list: { id: string; sender_role: string; sender_name?: string | null }[]): Set<string> => {
+  const out = new Set<string>();
+  let last: string | null = null;
+  for (const m of list) {
+    if (m.sender_role !== "staff" || !m.sender_name) continue;
+    if (last && last !== m.sender_name) out.add(m.id);
+    last = m.sender_name;
+  }
+  return out;
+};
+
+const AVATAR_TONES = [
+  "bg-primary/20 text-primary",
+  "bg-info/20 text-info",
+  "bg-accent/20 text-accent",
+  "bg-success/20 text-success",
+  "bg-warning/20 text-warning",
+];
+const toneFor = (name: string) =>
+  AVATAR_TONES[[...name].reduce((n, c) => n + c.charCodeAt(0), 0) % AVATAR_TONES.length] ?? "bg-primary/20 text-primary";
+
+/** The agent's initial in a round badge; the colour is always the same for the same name. */
+function AgentAvatar({ name, className }: { name: string; className?: string }) {
+  return (
+    <span
+      aria-hidden
+      className={cn("grid shrink-0 place-items-center rounded-full font-display font-semibold uppercase", toneFor(name), className)}
+    >
+      {[...name][0]}
+    </span>
+  );
+}
 
 const seenKey = (id: string) => `moa-chat-seen-${id}`;
 const readSeen = (id: string): string | null => {
@@ -83,13 +128,18 @@ export function SupportChat() {
   hiddenRef.current = hidden;
 
   const loadMessages = useCallback(async (id: string) => {
-    const { data } = await supabase
-      .from("messages")
-      .select("id, sender_role, body, created_at")
-      .eq("conversation_id", id)
-      .order("created_at", { ascending: true })
-      .limit(200);
-    const list = (data ?? []) as Msg[];
+    const cols = "id, sender_role, body, created_at";
+    const query = (c: string) =>
+      supabase
+        .from("messages")
+        .select(c)
+        .eq("conversation_id", id)
+        .order("created_at", { ascending: true })
+        .limit(200);
+    let res = await query(`${cols}, sender_name`);
+    // The database update that saves agent names has not been run yet: load the messages without names.
+    if (res.error && /sender_name/.test(res.error.message)) res = await query(cols);
+    const list = (res.data ?? []) as unknown as Msg[];
     setMsgs((prev) => [...list, ...prev.filter((m) => m.local === "failed")]);
     const last = list[list.length - 1];
     if (openRef.current && last) {
@@ -194,7 +244,7 @@ export function SupportChat() {
           }
           bumpChatUnread();
           if (hiddenRef.current) return;
-          toast("New reply from MOA Support", {
+          toast(m.sender_name ? `${m.sender_name} replied` : "New reply from MOA Support", {
             description: m.body.length > 80 ? `${m.body.slice(0, 77)}…` : m.body,
             icon: <i className="bx bx-support text-xl" />,
             action: { label: "Open", onClick: () => setOpen(true) },
@@ -296,8 +346,12 @@ export function SupportChat() {
     a.sender_role !== "system" &&
     b.sender_role !== "system" &&
     a.sender_role === b.sender_role &&
+    (a.sender_name ?? "") === (b.sender_name ?? "") &&
     dayKey(a.created_at) === dayKey(b.created_at) &&
     new Date(b.created_at).getTime() - new Date(a.created_at).getTime() < 5 * 60 * 1000;
+
+  const agentName = currentAgent(msgs);
+  const joins = agentJoins(msgs);
 
   return (
     <div className="fixed bottom-5 right-5 z-50 flex flex-col items-end gap-3 max-md:bottom-24">
@@ -317,12 +371,18 @@ export function SupportChat() {
             {...swipe}
             className="flex shrink-0 touch-none items-center gap-3 border-b border-border px-4 pb-3 pt-4 md:py-3"
           >
-            <span className="grid size-10 shrink-0 place-items-center rounded-full bg-primary/15 text-primary">
-              <i className="bx bx-support text-xl" />
-            </span>
+            {agentName ? (
+              <AgentAvatar name={agentName} className="size-10 text-base" />
+            ) : (
+              <span className="grid size-10 shrink-0 place-items-center rounded-full bg-primary/15 text-primary">
+                <i className="bx bx-support text-xl" />
+              </span>
+            )}
             <div className="min-w-0 flex-1 leading-tight">
-              <p className="truncate font-display text-[15px] font-semibold">MOA Support</p>
-              <p className="font-body text-xs text-muted-foreground">We reply as soon as we can</p>
+              <p className="truncate font-display text-[15px] font-semibold">{agentName ?? "MOA Support"}</p>
+              <p className="font-body text-xs text-muted-foreground">
+                {agentName ? "MOA Mart support" : "We reply as soon as we can"}
+              </p>
             </div>
             <button
               onClick={() => setOpen(false)}
@@ -374,6 +434,11 @@ export function SupportChat() {
                           </span>
                         </div>
                       )}
+                      {joins.has(m.id) && (
+                        <p className="mx-auto my-2 max-w-[85%] rounded-xl bg-secondary/50 px-3 py-1.5 text-center font-body text-xs text-muted-foreground">
+                          {m.sender_name} joined the conversation
+                        </p>
+                      )}
                       {m.sender_role === "system" ? (
                         <p className="mx-auto my-2 max-w-[85%] rounded-xl bg-secondary/50 px-3 py-1.5 text-center font-body text-xs text-muted-foreground">
                           {m.body}
@@ -386,17 +451,25 @@ export function SupportChat() {
                             first ? "mt-3" : "mt-0.5",
                           )}
                         >
-                          {!mine && (
-                            <span
-                              className={cn(
-                                "grid size-7 shrink-0 place-items-center rounded-full bg-primary/15 text-primary",
-                                !last && "invisible",
-                              )}
-                            >
-                              <i className="bx bx-support text-sm" />
-                            </span>
-                          )}
+                          {!mine &&
+                            (m.sender_name ? (
+                              <AgentAvatar name={m.sender_name} className={cn("size-7 text-xs", !last && "invisible")} />
+                            ) : (
+                              <span
+                                className={cn(
+                                  "grid size-7 shrink-0 place-items-center rounded-full bg-primary/15 text-primary",
+                                  !last && "invisible",
+                                )}
+                              >
+                                <i className="bx bx-support text-sm" />
+                              </span>
+                            ))}
                           <div className={cn("flex max-w-[78%] flex-col", mine ? "items-end" : "items-start")}>
+                            {!mine && first && m.sender_name && (
+                              <span className="mb-1 px-1 font-body text-[11px] font-medium text-muted-foreground">
+                                {m.sender_name}
+                              </span>
+                            )}
                             <div
                               className={cn(
                                 "break-words rounded-2xl px-3.5 py-2 font-body text-[15px] leading-snug",
