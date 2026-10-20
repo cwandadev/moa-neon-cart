@@ -6,22 +6,17 @@ import { ProductCard } from "@/components/shop/ProductCard";
 import { CATEGORIES, type Product } from "@/lib/products";
 import { fetchCatalog, fetchCategoryNames, fetchPriceBounds } from "@/lib/catalog";
 import { usePersistedState } from "@/lib/persist";
+import { jsonLd, organizationLd, seoMeta, websiteLd } from "@/lib/seo";
 
 export const Route = createFileRoute("/")({
   head: () => ({
-    meta: [
-      { title: "MOA Mart — Futuristic Online Store" },
-      {
-        name: "description",
-        content:
-          "Shop clothing, shoes, kitchen, lighting, electronics, tech gadgets, toys and art at MOA Mart.",
-      },
-      { property: "og:title", content: "MOA Mart — Futuristic Online Store" },
-      {
-        property: "og:description",
-        content: "Clothing, shoes, kitchen, electronics and more, delivered to your door.",
-      },
-    ],
+    ...seoMeta({
+      title: "MOA Mart — Online shopping in Kigali, Rwanda",
+      description:
+        "Shop clothing, shoes, kitchen items, lighting, electronics, tech gadgets, toys and art at MOA Mart. Pay with MTN MoMo or Airtel Money. Delivery in Kigali.",
+      path: "/",
+    }),
+    scripts: [jsonLd(organizationLd()), jsonLd(websiteLd())],
   }),
   component: Catalog,
 });

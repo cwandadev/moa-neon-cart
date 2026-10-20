@@ -14,6 +14,9 @@ import { money } from "@/lib/products";
 import { useStore } from "@/lib/store";
 import { supabase } from "@/lib/supabase";
 import { lineProductFor } from "@/lib/variants";
+import { SelectCheck, SelectionBar, SelectionStrip } from "@/components/shop/SelectionBar";
+import { useLongPress } from "@/lib/longPress";
+import { isPickableOrder, orderSelectionActions } from "@/lib/selection";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/orders/")({
@@ -242,12 +245,28 @@ type CardProps = {
   onCancel: (o: Row) => void;
   onBuyAgain: (o: Row) => void;
   busy: boolean;
+  selecting: boolean;
+  picked: boolean;
+  pickable: boolean;
+  onPick: (code: string) => void;
+  onStartSelect: (code: string) => void;
 };
 
 const itemCount = (o: Row) => o.order_items.reduce((n, i) => n + i.qty, 0);
 
 /** Phones: one order per row. */
-function OrderCard({ o, now, canHide, onRemove, onCancel, onBuyAgain, busy }: CardProps) {
+function OrderCard({ o, now, canHide, onRemove, onCancel, onBuyAgain, busy, selecting, picked, pickable, onPick, onStartSelect }: CardProps) {
+  const lp = useLongPress(() => onStartSelect(o.code), !selecting && pickable);
+  const onCardClick = (e: { preventDefault: () => void }) => {
+    if (lp.consumeLongPress()) {
+      e.preventDefault();
+      return;
+    }
+    if (selecting) {
+      e.preventDefault();
+      if (pickable) onPick(o.code);
+    }
+  };
   const stage = stageOf(o);
   const meta = STAGE[stage];
   const left = stage === "to_pay" ? minutesLeft(o.reserved_until, now) : null;
@@ -259,14 +278,27 @@ function OrderCard({ o, now, canHide, onRemove, onCancel, onBuyAgain, busy }: Ca
 
   return (
     <li
+      {...lp.handlers}
       className={cn(
         "rounded-2xl border bg-card/60 p-4 transition-colors hover:border-primary/40",
         stage === "to_pay" ? "border-warning/40" : "border-border",
+        selecting && "select-none",
+        selecting && !pickable && "opacity-60",
+        picked && "border-primary bg-primary/5 ring-1 ring-primary",
       )}
     >
-      <Link to="/orders/$orderId" params={{ orderId: o.code }} className="block">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
+      <Link to="/orders/$orderId" params={{ orderId: o.code }} onClick={onCardClick} className="block">
+        <div className="flex items-start gap-3">
+          {selecting && (
+            <SelectCheck
+              checked={picked}
+              disabled={!pickable}
+              onToggle={() => onPick(o.code)}
+              label={`Select order ${o.code}`}
+              className="-ml-2 -mt-2"
+            />
+          )}
+          <div className="min-w-0 flex-1">
             <p className="font-body text-sm font-medium text-primary">{o.code}</p>
             <p className="font-body text-xs text-muted-foreground">{dateText(o.created_at)}</p>
           </div>
@@ -310,7 +342,7 @@ function OrderCard({ o, now, canHide, onRemove, onCancel, onBuyAgain, busy }: Ca
         )}
       </Link>
 
-      <div className="mt-4">
+      <div className={cn("mt-4", selecting && "pointer-events-none opacity-40")}>
         <CardActions
           o={o}
           stage={stage}
@@ -357,7 +389,18 @@ function Mosaic({ items }: { items: Item[] }) {
 }
 
 /** Desktop: a card in a three-across grid. */
-function OrderTile({ o, now, canHide, onRemove, onCancel, onBuyAgain, busy }: CardProps) {
+function OrderTile({ o, now, canHide, onRemove, onCancel, onBuyAgain, busy, selecting, picked, pickable, onPick, onStartSelect }: CardProps) {
+  const lp = useLongPress(() => onStartSelect(o.code), !selecting && pickable);
+  const onCardClick = (e: { preventDefault: () => void }) => {
+    if (lp.consumeLongPress()) {
+      e.preventDefault();
+      return;
+    }
+    if (selecting) {
+      e.preventDefault();
+      if (pickable) onPick(o.code);
+    }
+  };
   const stage = stageOf(o);
   const meta = STAGE[stage];
   const left = stage === "to_pay" ? minutesLeft(o.reserved_until, now) : null;
@@ -368,12 +411,34 @@ function OrderTile({ o, now, canHide, onRemove, onCancel, onBuyAgain, busy }: Ca
 
   return (
     <li
+      {...lp.handlers}
       className={cn(
-        "group flex flex-col overflow-hidden rounded-2xl border bg-card/60 transition-colors hover:border-primary/50",
+        "group relative flex flex-col overflow-hidden rounded-2xl border bg-card/60 transition-colors hover:border-primary/50",
         stage === "to_pay" ? "border-warning/50" : "border-border",
+        selecting && "select-none",
+        selecting && !pickable && "opacity-60",
+        picked && "border-primary bg-primary/5 ring-2 ring-primary",
       )}
     >
-      <Link to="/orders/$orderId" params={{ orderId: o.code }} className="flex flex-1 flex-col">
+      {selecting ? (
+        <SelectCheck
+          checked={picked}
+          disabled={!pickable}
+          onToggle={() => onPick(o.code)}
+          label={`Select order ${o.code}`}
+          className="absolute right-1 top-1 z-10"
+        />
+      ) : (
+        pickable && (
+          <SelectCheck
+            checked={false}
+            onToggle={() => onStartSelect(o.code)}
+            label={`Select order ${o.code}`}
+            className="absolute right-1 top-1 z-10 hidden opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:hover)]:grid"
+          />
+        )
+      )}
+      <Link to="/orders/$orderId" params={{ orderId: o.code }} onClick={onCardClick} className="flex flex-1 flex-col">
         <div className="relative">
           <Mosaic items={o.order_items} />
           <span className="absolute left-3 top-3 rounded-full bg-background/90 p-0.5 shadow-sm">
@@ -408,7 +473,7 @@ function OrderTile({ o, now, canHide, onRemove, onCancel, onBuyAgain, busy }: Ca
         </div>
       </Link>
 
-      <div className="px-4 pb-4">
+      <div className={cn("px-4 pb-4", selecting && "pointer-events-none opacity-40")}>
         <CardActions
           o={o}
           stage={stage}
@@ -441,6 +506,10 @@ function MyOrders() {
   const [busyCode, setBusyCode] = useState("");
   const [cancelFor, setCancelFor] = useState<Row | null>(null);
   const [clearOpen, setClearOpen] = useState(false);
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(() => new Set());
+  const [cancelManyOpen, setCancelManyOpen] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   useEffect(() => {
     const t = window.setInterval(() => setNow(Date.now()), 15000);
@@ -514,6 +583,43 @@ function MyOrders() {
   const visible = rest.slice(0, shown);
   const clearable = stages.filter(({ s }) => s === "cancelled" || s === "expired").map(({ r }) => r);
 
+  // Selection: the orders in the current view that an action can apply to, and what the selection allows.
+  const viewPickable = filtered.filter(({ r }) => isPickableOrder(r)).map(({ r }) => r);
+  const selectedRows = rows.filter((r) => picked.has(r.code));
+  const { cancelable, removable, rebuyable } = orderSelectionActions(selectedRows, canHide);
+  const toggleOne = (code: string) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(code)) next.delete(code);
+      else next.add(code);
+      return next;
+    });
+  const startSelect = (code?: string) => {
+    setSelecting(true);
+    if (code) setPicked(new Set([code]));
+  };
+  const stopSelect = () => {
+    setSelecting(false);
+    setPicked(new Set());
+  };
+  const pickMany = (list: Row[]) => setPicked(new Set(list.map((r) => r.code)));
+
+  // Leave selection mode with Escape, and forget orders that are no longer in the list.
+  useEffect(() => {
+    if (!selecting) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") stopSelect();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selecting]);
+  useEffect(() => {
+    setPicked((prev) => {
+      const keep = new Set([...prev].filter((c) => rows.some((r) => r.code === c)));
+      return keep.size === prev.size ? prev : keep;
+    });
+  }, [rows]);
+
   const hide = async (codes: string[], hidden: boolean) => {
     const { error: err } = await supabase.rpc("hide_my_orders", { p_codes: codes, p_hidden: hidden });
     if (err) {
@@ -553,45 +659,122 @@ function MyOrders() {
     await load();
   };
 
-  const buyAgain = async (o: Row) => {
-    setBusyCode(o.code);
+  /** Puts the items of one order back in the cart, at today's price and stock. */
+  const addOrderItems = async (o: Row): Promise<{ added: number; skipped: string[] }> => {
     let added = 0;
     const skipped: string[] = [];
-    try {
-      for (const it of o.order_items) {
-        if (!it.product_id) {
-          skipped.push(it.name);
-          continue;
-        }
-        const p = await fetchProduct(it.product_id);
-        if (!p) {
-          skipped.push(it.name);
-          continue;
-        }
-        const variants = p.variants ?? [];
-        const variant = it.variant_id ? (variants.find((v) => v.id === it.variant_id) ?? null) : null;
-        const hasOptions = variants.length > 0;
-        const stock = hasOptions ? (variant?.stock ?? 0) : p.stock;
-        if ((hasOptions && !variant) || stock <= 0) {
-          skipped.push(it.name);
-          continue;
-        }
-        addToCart(lineProductFor(p, variant), Math.min(it.qty, stock, 10));
-        added += 1;
+    for (const it of o.order_items) {
+      if (!it.product_id) {
+        skipped.push(it.name);
+        continue;
       }
-    } catch {
-      toast.error("Could not add these items. Please try again.");
-      setBusyCode("");
-      return;
+      const p = await fetchProduct(it.product_id);
+      if (!p) {
+        skipped.push(it.name);
+        continue;
+      }
+      const variants = p.variants ?? [];
+      const variant = it.variant_id ? (variants.find((v) => v.id === it.variant_id) ?? null) : null;
+      const hasOptions = variants.length > 0;
+      const stock = hasOptions ? (variant?.stock ?? 0) : p.stock;
+      if ((hasOptions && !variant) || stock <= 0) {
+        skipped.push(it.name);
+        continue;
+      }
+      addToCart(lineProductFor(p, variant), Math.min(it.qty, stock, 10));
+      added += 1;
     }
-    setBusyCode("");
+    return { added, skipped };
+  };
+
+  const reportAdded = (added: number, skipped: string[]) => {
     if (added > 0) {
       toast.success(`Added ${added} ${added === 1 ? "item" : "items"} to your cart`, {
-        ...(skipped.length > 0 ? { description: `No longer available: ${skipped.join(", ")}` } : {}),
+        ...(skipped.length > 0 ? { description: `No longer available: ${[...new Set(skipped)].join(", ")}` } : {}),
         action: { label: "View cart", onClick: () => setCartOpen(true) },
       });
     } else {
       toast.error("These items are no longer available.");
+    }
+  };
+
+  const buyAgain = async (o: Row) => {
+    setBusyCode(o.code);
+    try {
+      const r = await addOrderItems(o);
+      reportAdded(r.added, r.skipped);
+    } catch {
+      toast.error("Could not add these items. Please try again.");
+    }
+    setBusyCode("");
+  };
+
+  const buyAgainMany = async (list: Row[]) => {
+    setBulkBusy(true);
+    let added = 0;
+    const skipped: string[] = [];
+    try {
+      for (const o of list) {
+        const r = await addOrderItems(o);
+        added += r.added;
+        skipped.push(...r.skipped);
+      }
+    } catch {
+      toast.error("Could not add these items. Please try again.");
+      setBulkBusy(false);
+      return;
+    }
+    setBulkBusy(false);
+    reportAdded(added, skipped);
+    if (added > 0) stopSelect();
+  };
+
+  const removeMany = async (list: Row[]) => {
+    const codes = list.map((r) => r.code);
+    if (codes.length === 0) return;
+    setBulkBusy(true);
+    const ok = await hide(codes, true);
+    setBulkBusy(false);
+    if (ok) {
+      stopSelect();
+      toast(`Removed ${codes.length} ${codes.length === 1 ? "order" : "orders"} from your list`, {
+        action: { label: "Undo", onClick: () => void hide(codes, false) },
+      });
+    }
+  };
+
+  const cancelMany = async (list: Row[]) => {
+    const codes = list.map((r) => r.code);
+    if (codes.length === 0) return;
+    setBulkBusy(true);
+    let cancelled = 0;
+    let skipped: { code: string; reason: string }[] = [];
+    const bulk = await supabase.rpc("cancel_my_unpaid_orders", { p_codes: codes });
+    if (!bulk.error && bulk.data) {
+      const r = bulk.data as { cancelled: number; skipped: { code: string; reason: string }[] };
+      cancelled = r.cancelled;
+      skipped = r.skipped;
+    } else {
+      // The database update with the bulk function has not been run yet: cancel them one by one.
+      for (const code of codes) {
+        const { error: err } = await supabase.rpc("cancel_my_unpaid_order", { p_code: code });
+        if (err) skipped.push({ code, reason: err.message });
+        else cancelled += 1;
+      }
+    }
+    setBulkBusy(false);
+    await load();
+    stopSelect();
+    const why = skipped
+      .slice(0, 2)
+      .map((x) => `${x.code}: ${x.reason}`)
+      .join(" · ");
+    if (cancelled > 0) {
+      toast(`Cancelled ${cancelled} ${cancelled === 1 ? "order" : "orders"}`, {
+        ...(skipped.length > 0 ? { description: `${skipped.length} skipped. ${why}` } : {}),
+      });
+    } else {
+      toast.error("No order could be cancelled", { description: why });
     }
   };
 
@@ -634,19 +817,37 @@ function MyOrders() {
     onRemove: (o) => void removeOne(o),
     onCancel: setCancelFor,
     onBuyAgain: (o) => void buyAgain(o),
+    selecting,
+    picked: picked.has(r.code),
+    pickable: isPickableOrder(r),
+    onPick: toggleOne,
+    onStartSelect: startSelect,
   });
 
   return (
     <div className="min-h-screen bg-background">
       <Header />
-      <main className="mx-auto w-full max-w-6xl px-4 pb-28 pt-6 sm:px-6 lg:pb-14 lg:pt-8">
+      <main className={cn("mx-auto w-full max-w-6xl px-4 pt-6 sm:px-6 lg:pt-8", selecting ? "pb-48 lg:pb-32" : "pb-28 lg:pb-14")}>
         <div className="lg:grid lg:grid-cols-[16rem_minmax(0,1fr)] lg:items-start lg:gap-10">
           <aside className="lg:sticky lg:top-28">
-            <h1 className="font-display text-2xl font-semibold tracking-tight">My orders</h1>
-            <p className="mt-1 font-body text-sm text-muted-foreground">
-              {counts.all} {counts.all === 1 ? "order" : "orders"}
-              {waiting > 0 ? ` · ${waiting} waiting for payment` : ""}
-            </p>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h1 className="font-display text-2xl font-semibold tracking-tight">My orders</h1>
+                <p className="mt-1 font-body text-sm text-muted-foreground">
+                  {counts.all} {counts.all === 1 ? "order" : "orders"}
+                  {waiting > 0 ? ` · ${waiting} waiting for payment` : ""}
+                </p>
+              </div>
+              {counts.all > 0 && (
+                <Button
+                  variant={selecting ? "neon" : "glass"}
+                  className="h-10 shrink-0 rounded-xl px-4"
+                  onClick={() => (selecting ? stopSelect() : startSelect())}
+                >
+                  {selecting ? "Done" : "Select"}
+                </Button>
+              )}
+            </div>
 
             <div className="mt-4">{search}</div>
 
@@ -712,10 +913,39 @@ function MyOrders() {
             )}
             {error && <p className="mb-4 font-body text-sm text-destructive">{error}</p>}
 
+            {selecting && (
+              <SelectionStrip
+                noun="orders"
+                total={viewPickable.length}
+                picked={picked.size}
+                onToggleAll={() => pickMany(picked.size >= viewPickable.length ? [] : viewPickable)}
+                options={[
+                  { label: "All in this view", count: viewPickable.length, onPick: () => pickMany(viewPickable) },
+                  {
+                    label: "Waiting for payment",
+                    count: filtered.filter(({ s }) => s === "to_pay").length,
+                    onPick: () => pickMany(filtered.filter(({ s }) => s === "to_pay").map(({ r }) => r)),
+                  },
+                  {
+                    label: "Delivered",
+                    count: filtered.filter(({ s }) => s === "delivered").length,
+                    onPick: () => pickMany(filtered.filter(({ s }) => s === "delivered").map(({ r }) => r)),
+                  },
+                  {
+                    label: "Cancelled and expired",
+                    count: filtered.filter(({ s }) => s === "cancelled" || s === "expired").length,
+                    onPick: () =>
+                      pickMany(filtered.filter(({ s }) => s === "cancelled" || s === "expired").map(({ r }) => r)),
+                  },
+                  { label: "None", count: picked.size, onPick: () => pickMany([]) },
+                ]}
+              />
+            )}
+
             {loading ? (
-              <ul className="grid gap-3 lg:grid-cols-2 lg:gap-5">
+              <ul className="grid gap-3 md:grid-cols-2 md:gap-5">
                 {[0, 1, 2, 3].map((i) => (
-                  <li key={i} className="h-36 animate-pulse rounded-2xl border border-border bg-card/40 lg:h-72" />
+                  <li key={i} className="h-36 animate-pulse rounded-2xl border border-border bg-card/40 md:h-72" />
                 ))}
               </ul>
             ) : counts.all === 0 && !error ? (
@@ -749,12 +979,12 @@ function MyOrders() {
                     <h2 className="mb-2 flex items-center gap-2 font-display text-sm font-semibold text-warning">
                       <i className="bx bx-error-circle text-lg" /> Waiting for your payment
                     </h2>
-                    <ul className="grid gap-3 lg:hidden">
+                    <ul className="grid gap-3 md:hidden">
                     {pinned.map(({ r }) => (
                       <OrderCard key={r.id} {...cardProps(r)} />
                     ))}
                   </ul>
-                  <ul className="hidden gap-5 lg:grid lg:grid-cols-2">
+                  <ul className="hidden gap-5 md:grid md:grid-cols-2">
                     {pinned.map(({ r }) => (
                       <OrderTile key={r.id} {...cardProps(r)} />
                     ))}
@@ -765,12 +995,12 @@ function MyOrders() {
                 {rest.length > 0 && (
                   <>
                     {pinned.length > 0 && <h2 className="mb-2 font-display text-sm font-semibold">Earlier orders</h2>}
-                    <ul className="grid gap-3 lg:hidden">
+                    <ul className="grid gap-3 md:hidden">
                     {visible.map(({ r }) => (
                       <OrderCard key={r.id} {...cardProps(r)} />
                     ))}
                   </ul>
-                  <ul className="hidden gap-5 lg:grid lg:grid-cols-2">
+                  <ul className="hidden gap-5 md:grid md:grid-cols-2">
                     {visible.map(({ r }) => (
                       <OrderTile key={r.id} {...cardProps(r)} />
                     ))}
@@ -802,6 +1032,40 @@ function MyOrders() {
         </div>
       </main>
 
+      {selecting && picked.size > 0 && (
+        <SelectionBar count={picked.size} onExit={stopSelect}>
+          {cancelable.length > 0 && (
+            <Button
+              variant="destructive"
+              className="h-11 rounded-xl"
+              disabled={bulkBusy}
+              onClick={() => setCancelManyOpen(true)}
+            >
+              Cancel {cancelable.length}
+            </Button>
+          )}
+          {removable.length > 0 && (
+            <Button variant="glass" className="h-11 rounded-xl" disabled={bulkBusy} onClick={() => void removeMany(removable)}>
+              Remove {removable.length}
+            </Button>
+          )}
+          {rebuyable.length > 0 && (
+            <Button variant="neon" className="h-11 rounded-xl" disabled={bulkBusy} onClick={() => void buyAgainMany(rebuyable)}>
+              {bulkBusy ? "Working…" : `Buy again ${rebuyable.length}`}
+            </Button>
+          )}
+        </SelectionBar>
+      )}
+
+      <ConfirmDialog
+        open={cancelManyOpen}
+        onOpenChange={setCancelManyOpen}
+        title={`Cancel ${cancelable.length} unpaid ${cancelable.length === 1 ? "order" : "orders"}?`}
+        text="The items are released and these orders cannot be paid any more. This cannot be undone."
+        confirmLabel={`Cancel ${cancelable.length === 1 ? "order" : "orders"}`}
+        danger
+        onConfirm={() => void cancelMany(cancelable)}
+      />
       <ConfirmDialog
         open={cancelFor !== null}
         onOpenChange={(v) => {

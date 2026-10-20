@@ -18,6 +18,7 @@ import { AuthProvider } from "../lib/auth";
 import { CartDrawer } from "../components/shop/CartDrawer";
 import { SupportChat } from "../components/shop/SupportChat";
 import { BottomNav } from "../components/shop/BottomNav";
+import { SiteFooter } from "../components/shop/SiteFooter";
 
 function NotFoundComponent() {
   return (
@@ -79,9 +80,29 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   );
 }
 
+/** Pages for customers only: search engines should not list them. */
+const PRIVATE_ROUTES = [
+  "/admin",
+  "/account",
+  "/orders",
+  "/notifications",
+  "/wishlist",
+  "/login",
+  "/register",
+  "/forgot-password",
+  "/reset-password",
+];
+const privateMeta = (matches: { routeId?: unknown }[]) => {
+  const id = String(matches[matches.length - 1]?.routeId ?? "");
+  return PRIVATE_ROUTES.some((p) => id === p || id.startsWith(`${p}/`) || id.startsWith(`${p}.`))
+    ? [{ name: "robots", content: "noindex, nofollow" }]
+    : [];
+};
+
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
-  head: () => ({
+  head: ({ matches }) => ({
     meta: [
+      ...privateMeta(matches),
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "MOA Mart" },
@@ -90,6 +111,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { property: "og:title", content: "MOA Mart" },
       { property: "og:description", content: "Shop clothing, shoes, kitchen items, electronics and more at MOA Mart." },
       { property: "og:type", content: "website" },
+      { property: "og:site_name", content: "MOA Mart" },
+      { property: "og:locale", content: "en_RW" },
       { name: "twitter:card", content: "summary_large_image" },
       
       { name: "theme-color", content: "#0a0d13" },
@@ -109,7 +132,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         rel: "stylesheet",
         href: "https://cdn.jsdelivr.net/npm/boxicons@2.1.4/css/boxicons.min.css",
       },
-      { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
+      { rel: "icon", href: "/logo.svg", type: "image/svg+xml", sizes: "any" },
       { rel: "manifest", href: "/manifest.webmanifest" },
     ],
   }),
@@ -148,6 +171,7 @@ function RootComponent() {
       <StoreProvider>
         {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
         <Outlet />
+        <SiteFooter />
         <CartDrawer />
         <SupportChat />
         <BottomNav />

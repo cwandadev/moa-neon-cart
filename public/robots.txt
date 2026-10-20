@@ -1,14 +1,14 @@
-User-agent: Googlebot
-Allow: /
-
-User-agent: Bingbot
-Allow: /
-
-User-agent: Twitterbot
-Allow: /
-
-User-agent: facebookexternalhit
-Allow: /
-
+# Pages for customers are open. Private pages (account, orders, admin...) are not for search engines.
 User-agent: *
 Allow: /
+Disallow: /admin
+Disallow: /account
+Disallow: /orders
+Disallow: /notifications
+Disallow: /wishlist
+Disallow: /login
+Disallow: /register
+Disallow: /forgot-password
+Disallow: /reset-password
+
+Sitemap: https://www.moamart.shop/sitemap.xml

@@ -72,6 +72,15 @@ export async function markUnread(id: string) {
   await supabase.from("notifications").update({ read_at: null }).eq("id", id);
 }
 
+/** Mark several notifications as read, or as unread. Only the ones that change are saved. */
+export async function markMany(ids: string[], read: boolean) {
+  const targets = state.items.filter((n) => ids.includes(n.id) && (read ? !n.read_at : Boolean(n.read_at))).map((n) => n.id);
+  if (targets.length === 0) return;
+  const now = new Date().toISOString();
+  setItems(state.items.map((n) => (targets.includes(n.id) ? { ...n, read_at: read ? now : null } : n)));
+  await supabase.from("notifications").update({ read_at: read ? now : null }).in("id", targets);
+}
+
 /** Clear notifications from the list. They stay in the database until the nightly cleanup, so this can be undone. */
 export async function dismiss(ids: string[]) {
   if (ids.length === 0) return;
