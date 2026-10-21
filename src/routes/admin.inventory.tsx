@@ -10,6 +10,10 @@ import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/admin/inventory")({
+  // /admin/inventory?q=<SKU> opens the list already searched for that product.
+  validateSearch: (s: Record<string, unknown>): { q?: string | undefined } => ({
+    q: typeof s["q"] === "string" && s["q"] !== "" ? s["q"] : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "Inventory — MOA Mart Suite" },
@@ -262,6 +266,7 @@ function AdjustSheet({ open, product, history, onClose, onSaved }: { open: boole
 // ---------- the page ----------
 
 function Inventory() {
+  const { q: linkedSearch } = Route.useSearch();
   const [rows, setRows] = useState<Row[]>([]);
   const [moves, setMoves] = useState<Movement[]>([]);
   const [loading, setLoading] = useState(true);
@@ -273,6 +278,15 @@ function Inventory() {
   const [sheetId, setSheetId] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [history, setHistory] = useState<Movement[]>([]);
+
+  // Arriving from a link (for example "Restock" on the Overview): search for that product, in every level.
+  useEffect(() => {
+    if (!linkedSearch) return;
+    setQ(linkedSearch);
+    setFlt("all");
+    setCat("All");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkedSearch]);
 
   const loadMoves = useCallback(async () => {
     try {

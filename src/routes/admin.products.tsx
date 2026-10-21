@@ -17,6 +17,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useAuth } from "@/lib/auth";
+import { csvSafe, downloadText, toCsv, useLongPress } from "@/lib/adminTools";
 import { money } from "@/lib/products";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -1009,6 +1010,12 @@ function Products() {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [moveTo, setMoveTo] = useState("");
+  const press = useLongPress((id) => {
+    setSelectMode(true);
+    setSelected(new Set([id]));
+  });
 
   const load = useCallback(async () => {
     try {
@@ -1113,6 +1120,33 @@ function Products() {
   });
   const shown = filtered.slice(0, visible);
 
+  const moveSelected = async () => {
+    const ids = [...selected];
+    if (ids.length === 0 || !moveTo) return;
+    setBulkBusy(true);
+    const { error } = await supabase.from("products").update({ category_id: moveTo }).in("id", ids);
+    setBulkBusy(false);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    toast.success(`${ids.length} product${ids.length === 1 ? "" : "s"} moved to ${cats.find((c) => c.id === moveTo)?.name ?? "the new category"}.`);
+    setMoveOpen(false);
+    setSelected(new Set());
+    setSelectMode(false);
+    void load();
+  };
+
+  const exportSelected = () => {
+    const list = rows.filter((p) => selected.has(p.id));
+    const out: Array<Array<string | number | null | undefined>> = [
+      ["SKU", "Name", "Category", "Price (RWF)", "Stock", "Status"],
+      ...list.map((p) => [p.sku, csvSafe(p.name), p.category?.name ?? "", p.price, p.stock, p.archived_at ? "Archived" : "Active"]),
+    ];
+    downloadText(`moa-products-${new Date().toISOString().slice(0, 10)}.csv`, toCsv(out));
+    toast.success(`${list.length} product${list.length === 1 ? "" : "s"} exported.`);
+  };
+
   const toggleOne = (id: string) =>
     setSelected((prev) => {
       const next = new Set(prev);
@@ -1161,7 +1195,7 @@ function Products() {
                   setSelectMode((v) => !v);
                   setSelected(new Set());
                 }}
-                className={cn(btn.ghost, "lg:hidden", selectMode && "border-foreground/60 bg-white/10")}
+                className={cn(btn.ghost, selectMode && "border-foreground/60 bg-white/10")}
               >
                 <i aria-hidden className="bx bx-check-square text-lg" /> {selectMode ? "Done" : "Select"}
               </button>
@@ -1293,7 +1327,14 @@ function Products() {
               {shown.map((p) => {
                 const s = stockPill(p);
                 return (
-                  <li key={p.id} className={cn("rounded-2xl border bg-card p-4", selected.has(p.id) ? "border-foreground/60" : "border-[#262626]")}>
+                  <li
+                    key={p.id}
+                    {...press(p.id)}
+                    onClick={(e) => {
+                      if (selectMode && isAdmin && !(e.target as HTMLElement).closest("button, a, label, input")) toggleOne(p.id);
+                    }}
+                    className={cn("select-none rounded-2xl border bg-card p-4 [-webkit-touch-callout:none]", selected.has(p.id) ? "border-foreground/60" : "border-[#262626]")}
+                  >
                     <div className="flex items-start gap-3">
                       {selectMode && isAdmin && (
                         <label className="grid min-h-11 min-w-8 place-items-center">
@@ -1420,17 +1461,56 @@ function Products() {
         <button type="button" onClick={() => setSelected(new Set())} className={btn.quiet}>
           Clear
         </button>
+        <ActionMenu
+          up
+          label="More actions for the selected products"
+          items={[
+            { label: "Change category…", icon: "bx-category", onSelect: () => { setMoveTo(cats[0]?.id ?? ""); setMoveOpen(true); } },
+            { label: "Export selected", icon: "bx-download", onSelect: exportSelected },
+            { label: "Delete products", icon: "bx-trash", disabled: true, hint: "Products are archived, never deleted, so past orders keep working. Use Archive.", onSelect: () => undefined },
+          ]}
+        >
+          More
+          <i aria-hidden className="bx bx-chevron-up text-lg" />
+        </ActionMenu>
         {selArchived > 0 && (
-          <button type="button" disabled={bulkBusy} onClick={() => void bulk(false)} className={btn.ghost}>
+          <button type="button" disabled={bulkBusy} onClick={() => void bulk(false)} className={cn(btn.ghost, "flex-1")}>
             Restore ({selArchived})
           </button>
         )}
         {selActive > 0 && (
-          <button type="button" disabled={bulkBusy} onClick={() => void bulk(true)} className={btn.primary}>
+          <button type="button" disabled={bulkBusy} onClick={() => void bulk(true)} className={cn(btn.primary, "flex-1")}>
             Archive ({selActive})
           </button>
         )}
       </ActionBar>
+
+      <AdminSheet
+        open={moveOpen}
+        onClose={() => setMoveOpen(false)}
+        title="Change category"
+        subtitle={`${selected.size} product${selected.size === 1 ? "" : "s"} will move to the category you choose.`}
+        footer={
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button type="button" onClick={() => setMoveOpen(false)} className={btn.ghost}>
+              Cancel
+            </button>
+            <button type="button" disabled={bulkBusy || !moveTo} onClick={() => void moveSelected()} className={btn.primary}>
+              {bulkBusy ? "Moving…" : "Move products"}
+            </button>
+          </div>
+        }
+      >
+        <fieldset className="grid gap-2">
+          <legend className="mb-2 text-sm text-muted-foreground">New category</legend>
+          {cats.map((c) => (
+            <label key={c.id} className={cn("flex min-h-12 cursor-pointer items-center gap-3 rounded-2xl border px-4 transition-colors hover:bg-white/5", moveTo === c.id ? "border-foreground/60 bg-white/5" : "border-[#262626]")}>
+              <input type="radio" name="category" className="size-5" checked={moveTo === c.id} onChange={() => setMoveTo(c.id)} />
+              <span className="text-base">{c.name}</span>
+            </label>
+          ))}
+        </fieldset>
+      </AdminSheet>
 
       {editor && (
         <ProductEditor

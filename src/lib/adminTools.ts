@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -64,4 +64,58 @@ export function openPrintable(html: string): boolean {
   }
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
   return true;
+}
+
+/**
+ * Press and hold a row to start selecting, like on the storefront. Returns a function that gives the props for one row:
+ *   const press = useLongPress(startSelecting);
+ *   <button {...press(row.id)}>
+ * Moving the finger (scrolling) cancels it, and the tap that follows a long press does not open the row.
+ */
+export function useLongPress(onFire: (id: string) => void, ms = 450) {
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const origin = useRef<{ x: number; y: number } | null>(null);
+  const fired = useRef(false);
+  const fire = useRef(onFire);
+  fire.current = onFire;
+  const cancel = useCallback(() => {
+    clearTimeout(timer.current);
+    timer.current = undefined;
+    origin.current = null;
+  }, []);
+  useEffect(() => cancel, [cancel]);
+
+  return useCallback(
+    (id: string) => ({
+      onPointerDown: (e: ReactPointerEvent) => {
+        if (e.pointerType === "mouse") return;
+        fired.current = false;
+        origin.current = { x: e.clientX, y: e.clientY };
+        clearTimeout(timer.current);
+        timer.current = setTimeout(() => {
+          fired.current = true;
+          navigator.vibrate?.(15);
+          fire.current(id);
+        }, ms);
+      },
+      onPointerMove: (e: ReactPointerEvent) => {
+        const o = origin.current;
+        if (o && Math.hypot(e.clientX - o.x, e.clientY - o.y) > 10) cancel();
+      },
+      onPointerUp: cancel,
+      onPointerCancel: cancel,
+      onPointerLeave: cancel,
+      onClickCapture: (e: ReactMouseEvent) => {
+        if (fired.current) {
+          e.preventDefault();
+          e.stopPropagation();
+          fired.current = false;
+        }
+      },
+      onContextMenu: (e: ReactMouseEvent) => {
+        if (fired.current) e.preventDefault(); // the phone's own long-press menu must not appear
+      },
+    }),
+    [ms, cancel],
+  );
 }

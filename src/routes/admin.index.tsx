@@ -4,6 +4,7 @@ import { useShellAlerts } from "@/components/admin/alertsContext";
 import { change } from "@/components/admin/charts";
 import { btn } from "@/components/admin/controls";
 import { EmptyState, Kpi, PageHead, Skeleton } from "@/components/moa/ui";
+import { ago } from "@/lib/adminTools";
 import { money } from "@/lib/products";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -178,7 +179,7 @@ function Overview() {
             All clear. No orders to dispatch, no one waiting, and stock is fine.
           </div>
         ) : (
-          <ul className="grid gap-3 sm:grid-cols-3">
+          <ul className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             {open.map((n) => (
               <li key={n.key}>
                 <Link to={n.to} className={cn("flex min-h-24 items-center gap-4 rounded-2xl border p-4 transition-colors hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", TONE_CARD[n.a.level])}>
@@ -198,7 +199,7 @@ function Overview() {
       <section aria-label="Numbers" className="mt-8">
         <h2 className="mb-3 font-display text-lg font-semibold">Today</h2>
         {loading && !stats ? (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Loading numbers">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Loading numbers">
             {[0, 1, 2, 3].map((i) => (
               <div key={i} className="rounded-2xl border border-[#262626] bg-card p-5">
                 <Skeleton className="h-4 w-24" />
@@ -207,7 +208,7 @@ function Overview() {
             ))}
           </div>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <Kpi label="Orders today" value={String(stats?.ordersToday ?? 0)} icon="bx-receipt" delta={od?.text} tone={od?.tone ?? "flat"} />
             <Kpi label="Paid today" value={money(stats?.paidToday ?? 0)} icon="bx-trending-up" delta={pd?.text} tone={pd?.tone ?? "flat"} />
             <Kpi label="Paid, last 7 days" value={money(stats?.paidWeek ?? 0)} icon="bx-calendar-week" />
@@ -217,32 +218,41 @@ function Overview() {
         {stats && <p className="mt-3 text-sm text-muted-foreground">{stats.live} products on sale</p>}
       </section>
 
-      <div className="mt-8 grid gap-6 xl:grid-cols-2">
-        <section aria-label="Recent orders" className="rounded-2xl border border-[#262626] bg-card p-5">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <h2 className="font-display text-base font-semibold">Recent orders</h2>
-            <Link to="/admin/orders" className="text-sm text-primary hover:underline">
+      <div className="mt-10 grid grid-cols-1 gap-10 xl:grid-cols-2">
+        <section aria-label="Recent orders">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h2 className="font-display text-lg font-semibold">Recent orders</h2>
+            <Link to="/admin/orders" className="inline-flex min-h-11 items-center text-sm text-primary hover:underline">
               View all
             </Link>
           </div>
           {recent.length === 0 ? (
-            <EmptyState icon="bx-receipt" title={loading ? "Loading…" : "No orders yet"} hint={loading ? undefined : "Orders appear here as soon as customers place them."} />
+            <div className="rounded-2xl border border-[#262626] bg-card">
+              <EmptyState icon="bx-receipt" title={loading ? "Loading…" : "No orders yet"} hint={loading ? undefined : "Orders appear here as soon as customers place them."} />
+            </div>
           ) : (
-            <ul className="divide-y divide-[#262626]">
+            <ul className="grid grid-cols-1 gap-3">
               {recent.map((o) => {
                 const st = STAGE[o.fulfilment_status] ?? { label: o.fulfilment_status, cls: "bg-muted text-muted-foreground" };
                 return (
-                  <li key={o.id} className="flex items-center gap-3 py-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm">
-                        <span className="font-medium text-primary">{o.code}</span> · {o.customer_name}
-                      </p>
-                      <p className="truncate text-sm text-muted-foreground">{o.order_items.map((i) => i.name).join(", ")}</p>
-                    </div>
-                    <div className="grid shrink-0 justify-items-end gap-1">
-                      <span className="text-sm font-medium">{money(o.total)}</span>
-                      <span className={cn("whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium", st.cls)}>{st.label}</span>
-                    </div>
+                  <li key={o.id}>
+                    <Link
+                      to="/admin/orders"
+                      search={{ q: o.code }}
+                      aria-label={`Open order ${o.code}`}
+                      className="block rounded-2xl border border-[#262626] bg-card p-4 transition-colors hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="font-medium text-primary">{o.code}</p>
+                        <span className={cn("whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium", st.cls)}>{st.label}</span>
+                      </div>
+                      <p className="mt-2 break-words text-base">{o.customer_name}</p>
+                      <p className="mt-1 line-clamp-2 break-words text-sm text-muted-foreground">{o.order_items.map((i) => i.name).join(", ")}</p>
+                      <div className="mt-3 flex items-center justify-between gap-3 border-t border-[#262626] pt-3">
+                        <span className="font-display text-base font-semibold">{money(o.total)}</span>
+                        <span className="text-sm text-muted-foreground">{ago(o.created_at)} ago</span>
+                      </div>
+                    </Link>
                   </li>
                 );
               })}
@@ -250,35 +260,48 @@ function Overview() {
           )}
         </section>
 
-        <section aria-label="Stock alerts" className="rounded-2xl border border-[#262626] bg-card p-5">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <h2 className="font-display text-base font-semibold">Stock alerts</h2>
-            <Link to="/admin/inventory" className="text-sm text-primary hover:underline">
+        <section aria-label="Stock alerts">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h2 className="font-display text-lg font-semibold">Stock alerts</h2>
+            <Link to="/admin/inventory" className="inline-flex min-h-11 items-center text-sm text-primary hover:underline">
               Open inventory
             </Link>
           </div>
           {stock.length === 0 ? (
-            <EmptyState icon="bx-check-circle" title={loading ? "Loading…" : "Every product has enough stock"} />
+            <div className="rounded-2xl border border-[#262626] bg-card">
+              <EmptyState icon="bx-check-circle" title={loading ? "Loading…" : "Every product has enough stock"} />
+            </div>
           ) : (
-            <ul className="divide-y divide-[#262626]">
-              {stock.map((p) => (
-                <li key={p.id} className="flex items-center gap-3 py-3">
-                  {p.images[0] ? (
-                    <img src={p.images[0]} alt="" className="size-12 shrink-0 rounded-xl object-cover" />
-                  ) : (
-                    <span className="grid size-12 shrink-0 place-items-center rounded-xl bg-secondary text-muted-foreground">
-                      <i aria-hidden className="bx bx-package text-xl" />
-                    </span>
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm">{p.name}</p>
-                    <p className="text-sm text-muted-foreground">{p.sku}</p>
-                  </div>
-                  <span className={cn("shrink-0 text-sm font-medium", p.stock <= 0 ? "text-destructive" : "text-warning")}>
-                    {p.stock <= 0 ? "Out of stock" : `${p.stock} left`}
-                  </span>
-                </li>
-              ))}
+            <ul className="grid grid-cols-1 gap-3">
+              {stock.map((p) => {
+                const out = p.stock <= 0;
+                return (
+                  <li key={p.id} className="rounded-2xl border border-[#262626] bg-card p-4">
+                    <div className="flex items-start gap-3">
+                      {p.images[0] ? (
+                        <img src={p.images[0]} alt="" className="size-14 shrink-0 rounded-xl object-cover" />
+                      ) : (
+                        <span className="grid size-14 shrink-0 place-items-center rounded-xl bg-secondary text-muted-foreground">
+                          <i aria-hidden className="bx bx-package text-xl" />
+                        </span>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="line-clamp-2 break-words text-base">{p.name}</p>
+                        <p className="mt-0.5 text-sm text-muted-foreground">{p.sku}</p>
+                      </div>
+                    </div>
+                    <div className="mt-3 flex items-center justify-between gap-3 border-t border-[#262626] pt-3">
+                      <span className={cn("whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium", out ? "bg-destructive/10 text-destructive" : "bg-warning/10 text-warning")}>
+                        {out ? "Out of stock" : `${p.stock} left`}
+                      </span>
+                      <Link to="/admin/inventory" search={{ q: p.sku }} className={cn(btn.ghost, "h-10")}>
+                        Restock
+                        <i aria-hidden className="bx bx-chevron-right text-lg" />
+                      </Link>
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </section>

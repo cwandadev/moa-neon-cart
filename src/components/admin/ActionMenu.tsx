@@ -16,7 +16,7 @@ export type MenuItem = {
  * The "..." button of a row. On a phone it opens a sheet with big rows; on a tablet or desktop it opens
  * a small menu next to the button. Disabled actions stay visible and explain themselves.
  */
-export function ActionMenu({ items, label }: { items: MenuItem[]; label: string }) {
+export function ActionMenu({ items, label, up = false, children }: { items: MenuItem[]; label: string; /** open above the button (for a button at the bottom of the screen) */ up?: boolean; /** a text button instead of the three dots */ children?: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -67,9 +67,13 @@ export function ActionMenu({ items, label }: { items: MenuItem[]; label: string 
         aria-expanded={open}
         aria-controls={open ? id : undefined}
         onClick={() => setOpen((v) => !v)}
-        className="grid size-11 place-items-center rounded-xl text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className={
+          children
+            ? "inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-[#262626] px-4 text-sm font-medium text-foreground transition-colors hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            : "grid size-11 place-items-center rounded-xl text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        }
       >
-        <i aria-hidden className="bx bx-dots-vertical-rounded text-2xl" />
+        {children ?? <i aria-hidden className="bx bx-dots-vertical-rounded text-2xl" />}
       </button>
 
       {/* tablet and desktop: a small menu */}
@@ -79,7 +83,7 @@ export function ActionMenu({ items, label }: { items: MenuItem[]; label: string 
           id={id}
           role="menu"
           aria-label={label}
-          className="absolute right-0 top-full z-40 mt-1 hidden w-64 rounded-2xl border border-[#262626] bg-[#0a0a0a] p-1.5 shadow-2xl shadow-black/60 md:block"
+          className={cn("absolute right-0 z-40 hidden w-64 rounded-2xl border border-[#262626] bg-[#0a0a0a] p-1.5 shadow-2xl shadow-black/60 md:block", up ? "bottom-full mb-2" : "top-full mt-1")}
         >
           {items.map((it) => (
             <button
