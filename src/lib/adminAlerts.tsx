@@ -40,14 +40,16 @@ async function compute(): Promise<AdminAlerts | null> {
       .is("archived_at", null)
       .gt("stock", 0)
       .lte("stock", LOW_STOCK),
+    // Customers waiting: chats that are open and whose last message came from the customer (migration 000018).
     supabase
       .from("conversations")
-      .select("id, messages(sender_role, created_at)")
-      .order("created_at", { referencedTable: "messages", ascending: false })
-      .limit(1, { referencedTable: "messages" })
-      .limit(100),
+      .select("waiting_since", { count: "exact" })
+      .eq("status", "open")
+      .eq("needs_reply", true)
+      .order("waiting_since", { ascending: true })
+      .limit(1),
   ]);
-  if (pend.error || oldest.error || out.error || low.error || convs.error) return null;
+  if (pend.error || oldest.error || out.error || low.error) return null;
 
   const now = Date.now();
 
@@ -75,14 +77,26 @@ async function compute(): Promise<AdminAlerts | null> {
         ? { level: "orange", count: lowCount, label: `${lowCount} running low` }
         : { level: "green", count: 0, label: "Stock is healthy" };
 
-  const rows = (convs.data ?? []) as unknown as { messages: { sender_role: string; created_at: string }[] }[];
   let waitingCount = 0;
   let oldestWait = Infinity;
-  for (const r of rows) {
-    const m = r.messages[0];
-    if (m && m.sender_role === "client") {
-      waitingCount += 1;
-      oldestWait = Math.min(oldestWait, new Date(m.created_at).getTime());
+  if (!convs.error) {
+    waitingCount = convs.count ?? 0;
+    const since = (convs.data?.[0] as { waiting_since?: string | null } | undefined)?.waiting_since;
+    if (since) oldestWait = new Date(since).getTime();
+  } else {
+    // The database has not been updated yet (migration 000018): look at the last message of each chat instead.
+    const legacy = await supabase
+      .from("conversations")
+      .select("id, messages(sender_role, created_at)")
+      .order("created_at", { referencedTable: "messages", ascending: false })
+      .limit(1, { referencedTable: "messages" })
+      .limit(100);
+    for (const r of (legacy.data ?? []) as unknown as { messages: { sender_role: string; created_at: string }[] }[]) {
+      const m = r.messages[0];
+      if (m && m.sender_role === "client") {
+        waitingCount += 1;
+        oldestWait = Math.min(oldestWait, new Date(m.created_at).getTime());
+      }
     }
   }
   const inbox: Alert =
@@ -157,6 +171,7 @@ export function useAdminAlerts(enabled: boolean): AdminAlerts {
         });
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "products" }, () => schedule())
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "conversations" }, () => schedule())
       .subscribe();
 
     // Re-check every minute so "waiting too long" turns red without needing an event.

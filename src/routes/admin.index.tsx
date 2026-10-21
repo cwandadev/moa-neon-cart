@@ -1,21 +1,27 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
-import { Kpi, PageHead, Panel, StatusPill } from "@/components/moa/ui";
+import { useShellAlerts } from "@/components/admin/alertsContext";
+import { change } from "@/components/admin/charts";
+import { btn } from "@/components/admin/controls";
+import { EmptyState, Kpi, PageHead, Skeleton } from "@/components/moa/ui";
 import { money } from "@/lib/products";
 import { supabase } from "@/lib/supabase";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/admin/")({
   head: () => ({
     meta: [
       { title: "Overview — MOA Mart Suite" },
-      { name: "description", content: "A live look at orders, payments and stock." },
+      { name: "description", content: "What needs doing now, and how today compares with yesterday." },
     ],
   }),
   component: Overview,
 });
 
 const LOW_STOCK = 5;
+const DAY = 24 * 60 * 60 * 1000;
 
+type Slim = { created_at: string; paid_at: string | null; total: number; payment_status: string; fulfilment_status: string };
 type RecentOrder = {
   id: string;
   code: string;
@@ -27,29 +33,60 @@ type RecentOrder = {
   order_items: { name: string; qty: number }[];
 };
 type StockAlert = { id: string; name: string; sku: string; stock: number; images: string[] };
-type Stats = { orders: number; revenue: number; awaiting: number; alerts: number; live: number; chats: number };
+type Stats = {
+  ordersToday: number;
+  ordersYesterday: number;
+  paidToday: number;
+  paidYesterday: number;
+  paidWeek: number;
+  awaiting: number;
+  live: number;
+};
+
+function startOfDay(offsetDays: number): number {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime() + offsetDays * DAY;
+}
+
+const STAGE: Record<string, { label: string; cls: string }> = {
+  pending: { label: "Awaiting payment", cls: "bg-muted text-muted-foreground" },
+  confirmed: { label: "To dispatch", cls: "bg-warning/10 text-warning" },
+  out_for_delivery: { label: "On the way", cls: "bg-info/10 text-info" },
+  delivered: { label: "Delivered", cls: "bg-success/10 text-success" },
+  cancelled: { label: "Cancelled", cls: "bg-destructive/10 text-destructive" },
+};
+
+const TONE_CARD = {
+  green: "border-[#262626]",
+  orange: "border-warning/50 bg-warning/5",
+  red: "border-destructive/50 bg-destructive/5",
+} as const;
+const TONE_NUM = { green: "text-muted-foreground", orange: "text-warning", red: "text-destructive" } as const;
 
 function Overview() {
+  const alerts = useShellAlerts();
   const [stats, setStats] = useState<Stats | null>(null);
   const [recent, setRecent] = useState<RecentOrder[]>([]);
-  const [alerts, setAlerts] = useState<StockAlert[]>([]);
+  const [stock, setStock] = useState<StockAlert[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
     try {
-      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-      const [o, paid, aw, ac, live, ch, rec, al] = await Promise.all([
-        supabase.from("orders").select("id", { count: "exact", head: true }).neq("fulfilment_status", "cancelled"),
-        supabase.from("orders").select("total").eq("payment_status", "paid").limit(5000),
+      const weekAgo = new Date(startOfDay(-6)).toISOString();
+      const [week, aw, live, rec, al] = await Promise.all([
+        supabase
+          .from("orders")
+          .select("created_at, paid_at, total, payment_status, fulfilment_status")
+          .or(`created_at.gte.${weekAgo},paid_at.gte.${weekAgo}`)
+          .limit(5000),
         supabase
           .from("orders")
           .select("id", { count: "exact", head: true })
           .eq("payment_status", "awaiting_payment")
           .neq("fulfilment_status", "cancelled"),
-        supabase.from("products").select("id", { count: "exact", head: true }).is("archived_at", null).lte("stock", LOW_STOCK),
         supabase.from("products").select("id", { count: "exact", head: true }).is("archived_at", null),
-        supabase.from("conversations").select("id", { count: "exact", head: true }).gte("last_active_at", since),
         supabase
           .from("orders")
           .select("id, code, customer_name, total, payment_status, fulfilment_status, created_at, order_items(name, qty)")
@@ -63,22 +100,32 @@ function Overview() {
           .order("stock", { ascending: true })
           .limit(6),
       ]);
-      const failed = [o, paid, aw, ac, live, ch, rec, al].find((r) => r.error);
+      const failed = [week, aw, live, rec, al].find((r) => r.error);
       if (failed?.error) throw failed.error;
-      const revenue = (paid.data ?? []).reduce((n: number, r: { total: number }) => n + Number(r.total), 0);
+
+      const today = startOfDay(0);
+      const yesterday = startOfDay(-1);
+      const rows = (week.data ?? []) as unknown as Slim[];
+      const placed = (from: number, to: number) =>
+        rows.filter((o) => o.fulfilment_status !== "cancelled" && new Date(o.created_at).getTime() >= from && new Date(o.created_at).getTime() < to).length;
+      const paidIn = (from: number, to: number) =>
+        rows
+          .filter((o) => o.payment_status === "paid" && o.paid_at && new Date(o.paid_at).getTime() >= from && new Date(o.paid_at).getTime() < to)
+          .reduce((n, o) => n + Number(o.total), 0);
       setStats({
-        orders: o.count ?? 0,
-        revenue,
+        ordersToday: placed(today, today + DAY),
+        ordersYesterday: placed(yesterday, today),
+        paidToday: paidIn(today, today + DAY),
+        paidYesterday: paidIn(yesterday, today),
+        paidWeek: paidIn(startOfDay(-6), today + DAY),
         awaiting: aw.count ?? 0,
-        alerts: ac.count ?? 0,
         live: live.count ?? 0,
-        chats: ch.count ?? 0,
       });
       setRecent((rec.data ?? []) as unknown as RecentOrder[]);
-      setAlerts((al.data ?? []) as unknown as StockAlert[]);
+      setStock((al.data ?? []) as unknown as StockAlert[]);
       setError("");
     } catch {
-      setError("Could not load the overview. Check your connection and refresh.");
+      setError("Could not load the overview. Check your connection and try again.");
     } finally {
       setLoading(false);
     }
@@ -100,81 +147,141 @@ function Overview() {
     };
   }, [load]);
 
+  const needs: Array<{ key: string; to: "/admin/orders" | "/admin/inbox" | "/admin/inventory"; icon: string; title: string; a: typeof alerts.orders; quiet: string }> = [
+    { key: "orders", to: "/admin/orders", icon: "bx-receipt", title: "Orders to dispatch", a: alerts.orders, quiet: "Nothing to dispatch" },
+    { key: "inbox", to: "/admin/inbox", icon: "bx-conversation", title: "Customers waiting", a: alerts.inbox, quiet: "No one is waiting for a reply" },
+    { key: "stock", to: "/admin/inventory", icon: "bx-box", title: "Stock to fill", a: alerts.inventory, quiet: "Every product has enough stock" },
+  ];
+  const open = needs.filter((n) => n.a.level !== "green");
+
+  const od = stats ? change(stats.ordersToday, stats.ordersYesterday, false, "yesterday") : undefined;
+  const pd = stats ? change(stats.paidToday, stats.paidYesterday, true, "yesterday") : undefined;
+
   return (
     <>
-      <PageHead title="Overview" subtitle="A live look at orders, payments and stock." />
+      <PageHead title="Overview" subtitle="What needs doing now, and how today compares with yesterday." />
 
-      {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
+      {error && (
+        <div className="mb-4 rounded-2xl border border-destructive/40 bg-destructive/10 p-4 text-sm">
+          <p className="text-destructive">{error}</p>
+          <button type="button" onClick={() => void load()} className={cn(btn.ghost, "mt-3")}>
+            Try again
+          </button>
+        </div>
+      )}
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Kpi label="Orders" value={String(stats?.orders ?? 0)} icon="bx-receipt" />
-        <Kpi label="Paid Revenue" value={money(stats?.revenue ?? 0)} icon="bx-trending-up" />
-        <Kpi label="Awaiting Payment" value={String(stats?.awaiting ?? 0)} icon="bx-time-five" />
-        <Kpi label="Stock Alerts" value={String(stats?.alerts ?? 0)} icon="bx-error-circle" />
-      </div>
-      <p className="mt-3 text-xs text-muted-foreground">
-        {stats?.live ?? 0} products on sale · {stats?.chats ?? 0} chats in the last 24 hours
-      </p>
+      <section aria-label="Needs you now">
+        <h2 className="mb-3 font-display text-lg font-semibold">Needs you now</h2>
+        {open.length === 0 ? (
+          <div className="flex items-center gap-3 rounded-2xl border border-[#262626] bg-card p-4 text-sm text-muted-foreground">
+            <span className="size-2.5 rounded-full bg-success" aria-hidden />
+            All clear. No orders to dispatch, no one waiting, and stock is fine.
+          </div>
+        ) : (
+          <ul className="grid gap-3 sm:grid-cols-3">
+            {open.map((n) => (
+              <li key={n.key}>
+                <Link to={n.to} className={cn("flex min-h-24 items-center gap-4 rounded-2xl border p-4 transition-colors hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", TONE_CARD[n.a.level])}>
+                  <span className={cn("font-display text-4xl font-semibold tabular-nums", TONE_NUM[n.a.level])}>{n.a.count}</span>
+                  <span className="min-w-0">
+                    <span className="block text-base">{n.title}</span>
+                    <span className="block text-sm text-muted-foreground">{n.a.label}</span>
+                  </span>
+                  <i aria-hidden className="bx bx-chevron-right ml-auto text-2xl text-muted-foreground" />
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
-      <div className="mt-6 grid gap-4 xl:grid-cols-2">
-        <Panel title="Recent orders">
+      <section aria-label="Numbers" className="mt-8">
+        <h2 className="mb-3 font-display text-lg font-semibold">Today</h2>
+        {loading && !stats ? (
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Loading numbers">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="rounded-2xl border border-[#262626] bg-card p-5">
+                <Skeleton className="h-4 w-24" />
+                <Skeleton className="mt-4 h-8 w-32" />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <Kpi label="Orders today" value={String(stats?.ordersToday ?? 0)} icon="bx-receipt" delta={od?.text} tone={od?.tone ?? "flat"} />
+            <Kpi label="Paid today" value={money(stats?.paidToday ?? 0)} icon="bx-trending-up" delta={pd?.text} tone={pd?.tone ?? "flat"} />
+            <Kpi label="Paid, last 7 days" value={money(stats?.paidWeek ?? 0)} icon="bx-calendar-week" />
+            <Kpi label="Awaiting payment" value={String(stats?.awaiting ?? 0)} icon="bx-time-five" />
+          </div>
+        )}
+        {stats && <p className="mt-3 text-sm text-muted-foreground">{stats.live} products on sale</p>}
+      </section>
+
+      <div className="mt-8 grid gap-6 xl:grid-cols-2">
+        <section aria-label="Recent orders" className="rounded-2xl border border-[#262626] bg-card p-5">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <h2 className="font-display text-base font-semibold">Recent orders</h2>
+            <Link to="/admin/orders" className="text-sm text-primary hover:underline">
+              View all
+            </Link>
+          </div>
           {recent.length === 0 ? (
-            <p className="py-8 text-center text-xs text-muted-foreground">
-              {loading ? "Loading…" : "No orders yet."}
-            </p>
+            <EmptyState icon="bx-receipt" title={loading ? "Loading…" : "No orders yet"} hint={loading ? undefined : "Orders appear here as soon as customers place them."} />
           ) : (
-            <ul className="flex flex-col gap-4">
-              {recent.map((o) => (
-                <li key={o.id} className="flex items-center gap-3 text-xs">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate">
-                      <span className="text-primary">{o.code}</span> · {o.customer_name}
-                    </p>
-                    <p className="truncate text-[11px] text-muted-foreground">
-                      {o.order_items.map((i) => i.name).join(", ")}
-                    </p>
-                  </div>
-                  <div className="grid shrink-0 justify-items-end gap-1">
-                    <span className="text-primary">{money(o.total)}</span>
-                    <div className="flex gap-1">
-                      <StatusPill status={o.payment_status} />
-                      <StatusPill status={o.fulfilment_status} />
+            <ul className="divide-y divide-[#262626]">
+              {recent.map((o) => {
+                const st = STAGE[o.fulfilment_status] ?? { label: o.fulfilment_status, cls: "bg-muted text-muted-foreground" };
+                return (
+                  <li key={o.id} className="flex items-center gap-3 py-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm">
+                        <span className="font-medium text-primary">{o.code}</span> · {o.customer_name}
+                      </p>
+                      <p className="truncate text-sm text-muted-foreground">{o.order_items.map((i) => i.name).join(", ")}</p>
                     </div>
-                  </div>
-                </li>
-              ))}
+                    <div className="grid shrink-0 justify-items-end gap-1">
+                      <span className="text-sm font-medium">{money(o.total)}</span>
+                      <span className={cn("whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium", st.cls)}>{st.label}</span>
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           )}
-          <Link to="/admin/orders" className="mt-4 inline-block text-[11px] text-primary hover:underline">
-            View all orders
-          </Link>
-        </Panel>
+        </section>
 
-        <Panel title="Stock alerts">
-          {alerts.length === 0 ? (
-            <p className="py-8 text-center text-xs text-muted-foreground">
-              {loading ? "Loading…" : "Every product has enough stock."}
-            </p>
+        <section aria-label="Stock alerts" className="rounded-2xl border border-[#262626] bg-card p-5">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <h2 className="font-display text-base font-semibold">Stock alerts</h2>
+            <Link to="/admin/inventory" className="text-sm text-primary hover:underline">
+              Open inventory
+            </Link>
+          </div>
+          {stock.length === 0 ? (
+            <EmptyState icon="bx-check-circle" title={loading ? "Loading…" : "Every product has enough stock"} />
           ) : (
-            <ul className="flex flex-col gap-3">
-              {alerts.map((p) => (
-                <li key={p.id} className="flex items-center gap-3 text-xs">
-                  {p.images[0] && <img src={p.images[0]} alt={p.name} className="size-10 rounded-lg object-cover" />}
+            <ul className="divide-y divide-[#262626]">
+              {stock.map((p) => (
+                <li key={p.id} className="flex items-center gap-3 py-3">
+                  {p.images[0] ? (
+                    <img src={p.images[0]} alt="" className="size-12 shrink-0 rounded-xl object-cover" />
+                  ) : (
+                    <span className="grid size-12 shrink-0 place-items-center rounded-xl bg-secondary text-muted-foreground">
+                      <i aria-hidden className="bx bx-package text-xl" />
+                    </span>
+                  )}
                   <div className="min-w-0 flex-1">
-                    <p className="truncate">{p.name}</p>
-                    <p className="text-[11px] text-muted-foreground">{p.sku}</p>
+                    <p className="truncate text-sm">{p.name}</p>
+                    <p className="text-sm text-muted-foreground">{p.sku}</p>
                   </div>
-                  <span className={p.stock <= 0 ? "text-destructive" : "text-warning"}>
+                  <span className={cn("shrink-0 text-sm font-medium", p.stock <= 0 ? "text-destructive" : "text-warning")}>
                     {p.stock <= 0 ? "Out of stock" : `${p.stock} left`}
                   </span>
                 </li>
               ))}
             </ul>
           )}
-          <Link to="/admin/inventory" className="mt-4 inline-block text-[11px] text-primary hover:underline">
-            Open live inventory
-          </Link>
-        </Panel>
+        </section>
       </div>
     </>
   );

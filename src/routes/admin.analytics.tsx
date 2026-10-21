@@ -1,20 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  Area,
-  AreaChart,
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
-import { Kpi, PageHead, Panel } from "@/components/moa/ui";
+import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { BarList, change, compact } from "@/components/admin/charts";
+import { btn, FilterTabs, type TabItem } from "@/components/admin/controls";
+import { EmptyState, Kpi, PageHead, Panel, Skeleton } from "@/components/moa/ui";
+import { usePersistedState } from "@/lib/persist";
 import { money } from "@/lib/products";
 import { supabase } from "@/lib/supabase";
-import { usePersistedState } from "@/lib/persist";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/admin/analytics")({
   head: () => ({
@@ -27,12 +20,12 @@ export const Route = createFileRoute("/admin/analytics")({
 });
 
 type Range = 7 | 30 | 90;
-const RANGES: Range[] = [7, 30, 90];
+const DAY = 24 * 60 * 60 * 1000;
 
 const FULFILMENT_LABELS: Record<string, string> = {
-  pending: "Pending",
-  confirmed: "Confirmed",
-  out_for_delivery: "Out for delivery",
+  pending: "Awaiting payment",
+  confirmed: "To dispatch",
+  out_for_delivery: "On the way",
   delivered: "Delivered",
   cancelled: "Cancelled",
 };
@@ -46,13 +39,14 @@ type Order = {
   order_items: Item[];
 };
 
-const dayKey = (d: Date) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const tip = { background: "#0a0a0a", border: "1px solid #262626", borderRadius: 12, fontSize: 13 };
 
-const compact = (v: number) =>
-  v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : v >= 1000 ? `${Math.round(v / 1000)}k` : String(v);
-
-const tip = { background: "#0a0a0a", border: "1px solid #262626", borderRadius: 12, fontSize: 12 };
+const sum = (orders: Order[]) => {
+  const active = orders.filter((o) => o.fulfilment_status !== "cancelled");
+  const value = active.reduce((n, o) => n + o.total, 0);
+  return { count: active.length, value, paid: active.filter((o) => o.payment_status === "paid").length, average: active.length ? Math.round(value / active.length) : 0 };
+};
 
 function Analytics() {
   const [days, setDays] = usePersistedState<Range>("moa:analytics:days", 30);
@@ -63,12 +57,11 @@ function Analytics() {
   const load = useCallback(async (range: Range) => {
     setLoading(true);
     try {
-      const since = new Date(Date.now() - range * 24 * 60 * 60 * 1000).toISOString();
+      // Twice the period: the second half is what the first half is compared with.
+      const since = new Date(Date.now() - 2 * range * DAY).toISOString();
       const { data, error: err } = await supabase
         .from("orders")
-        .select(
-          "created_at, total, payment_status, fulfilment_status, order_items(name, qty, price, products(category:categories(name)))",
-        )
+        .select("created_at, total, payment_status, fulfilment_status, order_items(name, qty, price, products(category:categories(name)))")
         .gte("created_at", since)
         .order("created_at", { ascending: true })
         .limit(5000);
@@ -76,7 +69,7 @@ function Analytics() {
       setOrders((data ?? []) as unknown as Order[]);
       setError("");
     } catch {
-      setError("Could not load analytics. Check your connection and refresh.");
+      setError("Could not load analytics. Check your connection and try again.");
     } finally {
       setLoading(false);
     }
@@ -87,24 +80,20 @@ function Analytics() {
   }, [days, load]);
 
   const view = useMemo(() => {
-    const active = orders.filter((o) => o.fulfilment_status !== "cancelled");
+    const edge = Date.now() - days * DAY;
+    const current = orders.filter((o) => new Date(o.created_at).getTime() >= edge);
+    const before = orders.filter((o) => new Date(o.created_at).getTime() < edge);
+    const active = current.filter((o) => o.fulfilment_status !== "cancelled");
 
-    const slots = new Map<string, { label: string; value: number; count: number }>();
+    const slots = new Map<string, { label: string; value: number }>();
     const today = new Date();
     for (let i = days - 1; i >= 0; i--) {
       const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
-      slots.set(dayKey(d), {
-        label: d.toLocaleDateString("en-GB", { day: "numeric", month: "short" }),
-        value: 0,
-        count: 0,
-      });
+      slots.set(dayKey(d), { label: d.toLocaleDateString("en-GB", { day: "numeric", month: "short" }), value: 0 });
     }
     for (const o of active) {
       const s = slots.get(dayKey(new Date(o.created_at)));
-      if (s) {
-        s.value += o.total;
-        s.count += 1;
-      }
+      if (s) s.value += o.total;
     }
 
     const prod = new Map<string, { qty: number; value: number }>();
@@ -115,88 +104,77 @@ function Analytics() {
         p.qty += it.qty;
         p.value += it.price * it.qty;
         prod.set(it.name, p);
-        const cn = it.products?.category?.name ?? "Other";
-        cat.set(cn, (cat.get(cn) ?? 0) + it.price * it.qty);
+        const name = it.products?.category?.name ?? "Other";
+        cat.set(name, (cat.get(name) ?? 0) + it.price * it.qty);
       }
     }
 
-    const totalValue = active.reduce((n, o) => n + o.total, 0);
     return {
+      now: sum(current),
+      before: sum(before),
       chart: [...slots.values()],
-      statusCounts: Object.entries(FULFILMENT_LABELS).map(([k, label]) => ({
-        label,
-        value: orders.filter((o) => o.fulfilment_status === k).length,
-      })),
-      top: [...prod]
-        .map(([name, v]) => ({ name, qty: v.qty, value: v.value }))
-        .sort((a, b) => b.qty - a.qty)
-        .slice(0, 8),
-      byCategory: [...cat].map(([label, value]) => ({ label: label.split(" ")[0] ?? label, value })),
-      totalValue,
-      count: active.length,
-      paidCount: active.filter((o) => o.payment_status === "paid").length,
+      status: Object.entries(FULFILMENT_LABELS).map(([k, label]) => ({ label, value: current.filter((o) => o.fulfilment_status === k).length })),
+      top: [...prod].map(([name, v]) => ({ name, ...v })).sort((a, b) => b.qty - a.qty).slice(0, 8),
+      byCategory: [...cat].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value),
     };
   }, [orders, days]);
+
+  const unit = `the ${days} days before`;
+  const dOrders = change(view.now.count, view.before.count, false, unit);
+  const dValue = change(view.now.value, view.before.value, true, unit);
+  const dAvg = change(view.now.average, view.before.average, true, unit);
+  const dPaid = change(view.now.paid, view.before.paid, false, unit);
+
+  const tabs: TabItem<`${Range}`>[] = [
+    { key: "7", label: "7 days" },
+    { key: "30", label: "30 days" },
+    { key: "90", label: "90 days" },
+  ];
 
   return (
     <>
       <PageHead title="Analytics" subtitle="Orders and order value from the storefront. Order value counts all orders, paid or not." />
 
-      <div className="mb-5 flex gap-2">
-        {RANGES.map((r) => (
-          <button
-            key={r}
-            type="button"
-            onClick={() => setDays(r)}
-            className={`hairline h-9 rounded-xl px-4 text-xs transition-colors ${
-              days === r ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            Last {r} days
+      <FilterTabs items={tabs} value={String(days) as `${Range}`} onChange={(k) => setDays(Number(k) as Range)} label="Period" />
+
+      {error && (
+        <div className="mt-4 rounded-2xl border border-destructive/40 bg-destructive/10 p-4 text-sm">
+          <p className="text-destructive">{error}</p>
+          <button type="button" onClick={() => void load(days)} className={cn(btn.ghost, "mt-3")}>
+            Try again
           </button>
-        ))}
+        </div>
+      )}
+
+      <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {loading && orders.length === 0 ? (
+          [0, 1, 2, 3].map((i) => (
+            <div key={i} className="rounded-2xl border border-[#262626] bg-card p-5">
+              <Skeleton className="h-4 w-24" />
+              <Skeleton className="mt-4 h-8 w-28" />
+            </div>
+          ))
+        ) : (
+          <>
+            <Kpi label="Orders" value={String(view.now.count)} icon="bx-receipt" delta={dOrders?.text} tone={dOrders?.tone ?? "flat"} />
+            <Kpi label="Order value" value={money(view.now.value)} icon="bx-trending-up" delta={dValue?.text} tone={dValue?.tone ?? "flat"} />
+            <Kpi label="Average order" value={view.now.count > 0 ? money(view.now.average) : "—"} icon="bx-calculator" delta={dAvg?.text} tone={dAvg?.tone ?? "flat"} />
+            <Kpi label="Paid orders" value={String(view.now.paid)} icon="bx-check-circle" delta={dPaid?.text} tone={dPaid?.tone ?? "flat"} />
+          </>
+        )}
       </div>
 
-      {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
-
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Kpi label="Orders" value={String(view.count)} icon="bx-receipt" />
-        <Kpi label="Order Value" value={money(view.totalValue)} icon="bx-trending-up" />
-        <Kpi
-          label="Average Order"
-          value={view.count > 0 ? money(Math.round(view.totalValue / view.count)) : "—"}
-          icon="bx-calculator"
-        />
-        <Kpi label="Paid Orders" value={String(view.paidCount)} icon="bx-check-circle" />
-      </div>
-
-      <div className="mt-6 grid gap-4 xl:grid-cols-3">
-        <Panel title="Order value per day" className="xl:col-span-2">
-          {view.count === 0 ? (
-            <p className="py-16 text-center text-sm text-muted-foreground">
-              {loading ? "Loading…" : "No orders in this period yet."}
-            </p>
+      <div className="mt-6">
+        <Panel title="Order value per day">
+          {view.now.count === 0 ? (
+            <EmptyState icon="bx-line-chart" title={loading ? "Loading…" : "No orders in this period yet"} hint={loading ? undefined : "Try a longer period."} />
           ) : (
-            <div className="h-72">
+            <div className="h-56 sm:h-72" role="img" aria-label="Order value per day">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={view.chart}>
+                <AreaChart data={view.chart} margin={{ left: 0, right: 8, top: 8 }}>
                   <CartesianGrid stroke="#262626" vertical={false} />
-                  <XAxis
-                    dataKey="label"
-                    stroke="#6b7280"
-                    fontSize={11}
-                    tickLine={false}
-                    axisLine={false}
-                    interval="preserveStartEnd"
-                    minTickGap={24}
-                  />
-                  <YAxis
-                    stroke="#6b7280"
-                    fontSize={11}
-                    tickLine={false}
-                    axisLine={false}
-                    tickFormatter={(v: number) => compact(v)}
-                  />
+                  <XAxis dataKey="label" stroke="#9ca3af" fontSize={12} tickLine={false} axisLine={false} interval="preserveStartEnd" minTickGap={32} />
+                  <YAxis stroke="#9ca3af" fontSize={12} tickLine={false} axisLine={false} width={44} tickFormatter={(v: number) => compact(v)} />
                   <Tooltip formatter={(v) => money(Number(v))} contentStyle={tip} />
                   <Area type="monotone" dataKey="value" stroke="#ffffff" fill="#ffffff22" strokeWidth={2} />
                 </AreaChart>
@@ -204,80 +182,44 @@ function Analytics() {
             </div>
           )}
         </Panel>
-
-        <Panel title="Orders by delivery status">
-          <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={view.statusCounts}>
-                <CartesianGrid stroke="#262626" vertical={false} />
-                <XAxis dataKey="label" stroke="#6b7280" fontSize={10} tickLine={false} axisLine={false} interval={0} />
-                <YAxis stroke="#6b7280" fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} />
-                <Tooltip cursor={{ fill: "#ffffff08" }} contentStyle={tip} />
-                <Bar dataKey="value" fill="#ffffff" radius={[8, 8, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </Panel>
       </div>
 
-      <div className="mt-6 grid gap-4 xl:grid-cols-2">
-        <Panel title="Top products" className="overflow-x-auto">
+      <div className="mt-6 grid gap-6 xl:grid-cols-3">
+        <Panel title="Orders by status">
+          <BarList label="Orders by status" rows={view.status} />
+        </Panel>
+
+        <Panel title="Top products">
           {view.top.length === 0 ? (
-            <p className="py-8 text-center text-xs text-muted-foreground">
-              {loading ? "Loading…" : "No products ordered in this period."}
-            </p>
+            <EmptyState icon="bx-package" title={loading ? "Loading…" : "No products ordered in this period"} />
           ) : (
-            <table className="w-full min-w-[360px] text-left text-xs">
-              <thead className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                <tr>
-                  <th className="pb-3">Product</th>
-                  <th className="pb-3">Units</th>
-                  <th className="pb-3">Value</th>
-                </tr>
-              </thead>
-              <tbody>
-                {view.top.map((p) => (
-                  <tr key={p.name} className="border-t border-[#262626]/60">
-                    <td className="py-3">{p.name}</td>
-                    <td className="py-3 text-muted-foreground">{p.qty}</td>
-                    <td className="py-3 text-primary">{money(p.value)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <ol className="divide-y divide-[#262626]" aria-label="Top products">
+              {view.top.map((p, i) => (
+                <li key={p.name} className="flex items-center gap-3 py-3">
+                  <span className="grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-sm text-muted-foreground">{i + 1}</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm">{p.name}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {p.qty} sold
+                    </p>
+                  </div>
+                  <span className="shrink-0 text-sm font-medium">{money(p.value)}</span>
+                </li>
+              ))}
+            </ol>
           )}
         </Panel>
 
         <Panel title="Order value by category">
           {view.byCategory.length === 0 ? (
-            <p className="py-8 text-center text-xs text-muted-foreground">
-              {loading ? "Loading…" : "No orders in this period yet."}
-            </p>
+            <EmptyState icon="bx-category" title={loading ? "Loading…" : "No orders in this period yet"} />
           ) : (
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={view.byCategory}>
-                  <CartesianGrid stroke="#262626" vertical={false} />
-                  <XAxis dataKey="label" stroke="#6b7280" fontSize={11} tickLine={false} axisLine={false} />
-                  <YAxis
-                    stroke="#6b7280"
-                    fontSize={11}
-                    tickLine={false}
-                    axisLine={false}
-                    tickFormatter={(v: number) => compact(v)}
-                  />
-                  <Tooltip cursor={{ fill: "#ffffff08" }} formatter={(v) => money(Number(v))} contentStyle={tip} />
-                  <Bar dataKey="value" fill="#ffffff" radius={[8, 8, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+            <BarList label="Order value by category" rows={view.byCategory} format={money} />
           )}
         </Panel>
       </div>
 
-      <p className="mt-6 text-xs text-muted-foreground">
-        Visitor traffic and customer sentiment will appear here once visit tracking and reviews are added.
-      </p>
+      <p className="mt-6 text-sm text-muted-foreground">Visitor traffic and customer sentiment will appear here once visit tracking and reviews are added.</p>
     </>
   );
 }

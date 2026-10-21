@@ -1,7 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useState, type ChangeEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { toast } from "sonner";
 import { z } from "zod";
-import { PageHead, Panel } from "@/components/moa/ui";
+import { ActionMenu, type MenuItem } from "@/components/admin/ActionMenu";
+import { AdminSheet } from "@/components/admin/AdminSheet";
+import { ActionBar, btn, field, FilterTabs, SearchField, type TabItem } from "@/components/admin/controls";
+import { EmptyState, PageHead, Skeleton } from "@/components/moa/ui";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -12,13 +16,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { useAuth } from "@/lib/auth";
 import { money } from "@/lib/products";
 import { supabase } from "@/lib/supabase";
@@ -201,26 +198,52 @@ const toForm = (cats: Cat[], p?: Row, cost?: number): Form => ({
   tags: p?.tags.join(", ") ?? "",
 });
 
-const stockState = (n: number) =>
-  n <= 0
-    ? { label: "Out of Stock", cls: "text-destructive" }
-    : n <= 5
-      ? { label: "Low Stock", cls: "text-warning" }
-      : { label: "In Stock", cls: "text-success" };
 
-const fieldClass =
-  "w-full rounded-xl border border-[#262626] bg-background px-3 text-sm text-foreground outline-none focus:border-foreground/50";
-// Same look without a width, for inputs that set their own width.
-const inputBase =
-  "rounded-xl border border-[#262626] bg-background px-3 text-sm text-foreground outline-none focus:border-foreground/50";
+// ---------- small building blocks of the form ----------
 
 function Field({ label, error, children }: { label: string; error?: string | undefined; children: ReactNode }) {
   return (
-    <label className="grid gap-1.5 text-xs text-muted-foreground">
-      <span>{label}</span>
+    <label className="grid gap-1.5" data-error={error ? "true" : undefined}>
+      <span className="text-sm text-muted-foreground">{label}</span>
       {children}
-      {error && <span className="text-[11px] text-red-400">{error}</span>}
+      {error && <span className="text-sm text-destructive">{error}</span>}
     </label>
+  );
+}
+
+/** A group of fields with a heading. Long optional groups can be folded away. */
+function Section({
+  title,
+  hint,
+  children,
+  fold,
+  startOpen = true,
+}: {
+  title: string;
+  hint?: string;
+  children: ReactNode;
+  fold?: boolean;
+  startOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(startOpen);
+  return (
+    <section className="rounded-2xl border border-[#262626] p-4">
+      {fold ? (
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+          className="flex min-h-11 w-full items-center justify-between gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <h3 className="font-display text-base font-semibold">{title}</h3>
+          <i aria-hidden className={cn("bx text-2xl text-muted-foreground", open ? "bx-chevron-up" : "bx-chevron-down")} />
+        </button>
+      ) : (
+        <h3 className="font-display text-base font-semibold">{title}</h3>
+      )}
+      {hint && <p className="mt-1 text-sm text-muted-foreground">{hint}</p>}
+      {open && <div className="mt-4 grid gap-4">{children}</div>}
+    </section>
   );
 }
 
@@ -228,11 +251,13 @@ function ChipsInput({
   values,
   onChange,
   placeholder,
+  label,
   max = 12,
 }: {
   values: string[];
   onChange: (v: string[]) => void;
   placeholder: string;
+  label: string;
   max?: number;
 }) {
   const [draft, setDraft] = useState("");
@@ -252,19 +277,20 @@ function ChipsInput({
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#262626] bg-background p-2">
       {values.map((v) => (
-        <span key={v} className="flex items-center gap-1 rounded-full bg-secondary px-2.5 py-1 text-xs text-foreground">
+        <span key={v} className="flex min-h-9 items-center gap-1 rounded-full bg-secondary pl-3 pr-1 text-sm text-foreground">
           {v}
           <button
             type="button"
             aria-label={`Remove ${v}`}
             onClick={() => onChange(values.filter((x) => x !== v))}
-            className="text-muted-foreground hover:text-destructive"
+            className="grid size-8 place-items-center rounded-full text-muted-foreground hover:text-destructive"
           >
-            ×
+            <i aria-hidden className="bx bx-x text-lg" />
           </button>
         </span>
       ))}
       <input
+        aria-label={label}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={(e) => {
@@ -276,8 +302,9 @@ function ChipsInput({
           }
         }}
         onBlur={() => add(draft)}
+        enterKeyHint="done"
         placeholder={values.length > 0 ? "" : placeholder}
-        className="min-w-[7rem] flex-1 bg-transparent px-1 py-1 text-sm outline-none"
+        className="h-10 min-w-[8rem] flex-1 bg-transparent px-2 text-base outline-none placeholder:text-muted-foreground"
       />
     </div>
   );
@@ -293,15 +320,20 @@ async function uploadImage(file: File, folder: string): Promise<string> {
   return supabase.storage.from("product-images").getPublicUrl(path).data.publicUrl;
 }
 
-function ProductDialog({
+function ProductEditor({
+  open,
   product,
+  seed,
   cats,
   rows,
   costs,
   onClose,
   onSaved,
 }: {
+  open: boolean;
   product?: Row | undefined;
+  /** A product to copy when adding a new one (Duplicate). */
+  seed?: Row | undefined;
   cats: Cat[];
   rows: Row[];
   costs: Record<string, number>;
@@ -310,8 +342,16 @@ function ProductDialog({
 }) {
   const { user } = useAuth();
   const existing = [...(product?.product_variants ?? [])].sort((a, b) => a.position - b.position);
+  // The starting point of the form: the product being edited, or the product being copied.
+  const base = product ?? seed;
+  const baseVariants = [...(base?.product_variants ?? [])].sort((a, b) => a.position - b.position);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const camRef = useRef<HTMLInputElement>(null);
 
-  const [form, setForm] = usePersistedState<Form>(`moa:pe:${product?.id ?? "new"}:form`, () => toForm(cats, product, product ? costs[product.id] : undefined), { sync: true });
+  const [form, setForm] = usePersistedState<Form>(`moa:pe:${product?.id ?? "new"}:form`, () => {
+    const f = toForm(cats, base, base ? costs[base.id] : undefined);
+    return seed && !product ? { ...f, name: `Copy of ${seed.name}`.slice(0, 80) } : f;
+  }, { sync: true });
   const [errors, setErrors] = useState<Errors>({});
   const [formError, setFormError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -319,30 +359,31 @@ function ProductDialog({
   const [urlInput, setUrlInput] = useState("");
 
   const [specs, setSpecs] = usePersistedState<Spec[]>(`moa:pe:${product?.id ?? "new"}:specs`, () =>
-    (product?.specs ?? []).filter((s) => !/^(sku|category)$/i.test(s.label.trim())), { sync: true });
+    (base?.specs ?? []).filter((s) => !/^(sku|category)$/i.test(s.label.trim())), { sync: true });
 
-  const [hasOptions, setHasOptions] = usePersistedState(`moa:pe:${product?.id ?? "new"}:hasOptions`, existing.length > 0, { sync: true });
-  const [opt1Name, setOpt1Name] = usePersistedState(`moa:pe:${product?.id ?? "new"}:opt1Name`, product?.option1_name ?? "Size", { sync: true });
-  const [opt2Name, setOpt2Name] = usePersistedState(`moa:pe:${product?.id ?? "new"}:opt2Name`, product?.option2_name ?? "Color", { sync: true });
-  const [opt1Values, setOpt1Values] = usePersistedState<string[]>(`moa:pe:${product?.id ?? "new"}:opt1Values`, () => uniq(existing.map((v) => v.option1)), { sync: true });
-  const [opt2Values, setOpt2Values] = usePersistedState<string[]>(`moa:pe:${product?.id ?? "new"}:opt2Values`, () => uniq(existing.map((v) => v.option2)), { sync: true });
+  const [hasOptions, setHasOptions] = usePersistedState(`moa:pe:${product?.id ?? "new"}:hasOptions`, baseVariants.length > 0, { sync: true });
+  const [opt1Name, setOpt1Name] = usePersistedState(`moa:pe:${product?.id ?? "new"}:opt1Name`, base?.option1_name ?? "Size", { sync: true });
+  const [opt2Name, setOpt2Name] = usePersistedState(`moa:pe:${product?.id ?? "new"}:opt2Name`, base?.option2_name ?? "Color", { sync: true });
+  const [opt1Values, setOpt1Values] = usePersistedState<string[]>(`moa:pe:${product?.id ?? "new"}:opt1Values`, () => uniq(baseVariants.map((v) => v.option1)), { sync: true });
+  const [opt2Values, setOpt2Values] = usePersistedState<string[]>(`moa:pe:${product?.id ?? "new"}:opt2Values`, () => uniq(baseVariants.map((v) => v.option2)), { sync: true });
   const [swatches, setSwatches] = usePersistedState<Record<string, string>>(`moa:pe:${product?.id ?? "new"}:swatches`, () => {
     const m: Record<string, string> = {};
-    for (const v of existing) {
+    for (const v of baseVariants) {
       if (!v.swatch) continue;
-      if (isColorName(product?.option1_name ?? "") && v.option1) m[v.option1] = v.swatch;
-      if (isColorName(product?.option2_name ?? "") && v.option2) m[v.option2] = v.swatch;
+      if (isColorName(base?.option1_name ?? "") && v.option1) m[v.option1] = v.swatch;
+      if (isColorName(base?.option2_name ?? "") && v.option2) m[v.option2] = v.swatch;
     }
     return m;
   }, { sync: true });
   const [variants, setVariants] = usePersistedState<Variant[]>(`moa:pe:${product?.id ?? "new"}:variants`, () =>
-    existing.map((v) => ({
-      id: v.id,
+    baseVariants.map((v) => ({
+      // A copy gets new combinations: no id, no SKU and no stock carried over.
+      ...(product ? { id: v.id } : {}),
       option1: v.option1 ?? "",
       option2: v.option2 ?? "",
-      sku: v.sku ?? "",
+      sku: product ? (v.sku ?? "") : "",
       price: v.price ? String(v.price) : "",
-      stock: String(v.stock),
+      stock: product ? String(v.stock) : "0",
       image: v.image ?? "",
       swatch: v.swatch ?? "",
     })), { sync: true });
@@ -414,6 +455,11 @@ function ProductDialog({
   };
 
   const removeImage = (i: number) => setForm((f) => ({ ...f, images: f.images.filter((_, j) => j !== i) }));
+  const makeMain = (i: number) =>
+    setForm((f) => {
+      const img = f.images[i];
+      return img ? { ...f, images: [img, ...f.images.filter((_, j) => j !== i)] } : f;
+    });
 
   const colorIndex = isColorName(opt1Name) ? 1 : opt2Values.length > 0 && isColorName(opt2Name) ? 2 : 0;
   const colorValues = colorIndex === 1 ? opt1Values : colorIndex === 2 ? opt2Values : [];
@@ -486,7 +532,11 @@ function ProductDialog({
     if (cleanSpecs.length > 20) errs.specs = "Up to 20 specifications.";
 
     setErrors(errs);
-    if (!r.success || Object.values(errs).some(Boolean)) return;
+    if (!r.success || Object.values(errs).some(Boolean)) {
+      setFormError("Please fix the fields marked in red.");
+      setTimeout(() => document.querySelector('[data-error="true"]')?.scrollIntoView({ block: "center", behavior: "smooth" }), 60);
+      return;
+    }
     const d = r.data;
 
     setSaving(true);
@@ -609,378 +659,336 @@ function ProductDialog({
     }
   };
 
-  const section = "grid gap-3 rounded-2xl border border-[#262626] p-4";
-  const sectionTitle = "font-display text-sm font-semibold text-foreground";
+  const title = product ? "Edit product" : seed ? "Duplicate product" : "Add product";
+  const subtitle = product
+    ? `Editing ${product.sku}. Change the stock of existing items on the Inventory page.`
+    : seed
+      ? `A copy of ${seed.name}. Change what is different, then save.`
+      : "The SKU and web address are generated automatically.";
 
   return (
-    <Dialog
-      open
-      onOpenChange={(o) => {
-        if (!o) onClose();
-      }}
-    >
-      <DialogContent className="moa-admin-dialog max-h-[92vh] w-[calc(100%-1.5rem)] overflow-y-auto rounded-2xl border-[#262626] sm:max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>{product ? "Edit product" : "Add product"}</DialogTitle>
-          <DialogDescription>
-            {product
-              ? `Editing ${product.sku}. Change stock of existing items on the Live Inventory page.`
-              : "The SKU and web address are generated automatically."}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="grid gap-4">
-          <div className={section}>
-            <h3 className={sectionTitle}>Basics</h3>
-            <Field label="Name" error={errors.name}>
-              <input value={form.name} onChange={set("name")} className={`${fieldClass} h-10`} placeholder="Linen shirt" />
-            </Field>
-            <Field label="Category" error={errors.categoryId}>
-              <select value={form.categoryId} onChange={set("categoryId")} className={`${fieldClass} h-10`}>
-                {cats.map((c) => (
-                  <option key={c.id} value={c.id} className="bg-card">
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              <Field label="Price (RWF)" error={errors.price}>
-                <input value={form.price} onChange={set("price")} inputMode="numeric" className={`${fieldClass} h-10`} />
-              </Field>
-              <Field label="Old price (RWF, optional)" error={errors.oldPrice}>
-                <input value={form.oldPrice} onChange={set("oldPrice")} inputMode="numeric" className={`${fieldClass} h-10`} />
-              </Field>
-              <Field label="Cost per unit (RWF)" error={errors.cost}>
-                <input value={form.cost} onChange={set("cost")} inputMode="numeric" className={`${fieldClass} h-10`} />
-              </Field>
-            </div>
-            <p className="-mt-1 text-[11px] text-muted-foreground">The cost is only visible to admins and is used for finance.</p>
-            {!product && !hasOptions && (
-              <Field label="Starting stock" error={errors.stock}>
-                <input value={form.stock} onChange={set("stock")} inputMode="numeric" className={`${fieldClass} h-10`} />
-              </Field>
-            )}
-          </div>
-
-          <div className={section}>
-            <h3 className={sectionTitle}>Photos</h3>
-            <p className="-mt-2 text-[11px] text-muted-foreground">The first photo is the main one.</p>
-            <div className="flex flex-wrap gap-2">
-              {form.images.map((u, i) => (
-                <div key={`${i}-${u}`} className="relative">
-                  <img src={u} alt="" className="size-16 rounded-lg object-cover" />
-                  <button
-                    type="button"
-                    aria-label="Remove photo"
-                    onClick={() => removeImage(i)}
-                    className="absolute -right-1.5 -top-1.5 grid size-5 place-items-center rounded-full bg-destructive text-[11px] text-white"
-                  >
-                    ×
-                  </button>
-                  {i === 0 && (
-                    <span className="absolute bottom-0 left-0 rounded-tr-md bg-primary px-1 text-[9px] text-primary-foreground">
-                      Main
-                    </span>
-                  )}
-                </div>
-              ))}
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <label className="hairline cursor-pointer rounded-xl px-3 py-2 text-xs text-foreground hover:text-primary">
-                {uploading ? "Uploading…" : "Upload photo"}
-                <input
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  className="hidden"
-                  disabled={uploading || form.images.length >= 6}
-                  onChange={(e) => void onFile(e)}
-                />
-              </label>
-              <span className="text-[11px] text-muted-foreground">JPG, PNG or WebP, up to 5 MB, max 6 photos</span>
-            </div>
-            <div className="flex gap-2">
-              <input
-                value={urlInput}
-                onChange={(e) => setUrlInput(e.target.value)}
-                placeholder="Or paste a photo link (https://...)"
-                className={`${fieldClass} h-9 text-xs`}
-              />
-              <button type="button" onClick={addUrl} className="hairline h-9 shrink-0 rounded-xl px-3 text-xs text-foreground">
-                Add
-              </button>
-            </div>
-            {errors.images && <span className="text-[11px] text-red-400">{errors.images}</span>}
-          </div>
-
-          <div className={section}>
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className={sectionTitle}>Options (sizes, colors…)</h3>
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  Turn this on when customers must choose, for example a size or a color. Each combination gets its own
-                  stock, and optionally its own price and photo.
-                </p>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={hasOptions}
-                onClick={() => setHasOptions((v) => !v)}
-                className={cn(
-                  "relative h-6 w-11 shrink-0 rounded-full transition-colors",
-                  hasOptions ? "bg-primary" : "bg-muted",
-                )}
-              >
-                <span
-                  className={cn(
-                    "absolute top-0.5 size-5 rounded-full bg-background transition-all",
-                    hasOptions ? "left-[22px]" : "left-0.5",
-                  )}
-                />
-              </button>
-            </div>
-
-            {hasOptions && (
-              <>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="grid gap-2">
-                    <Field label="Option 1 name">
-                      <input
-                        value={opt1Name}
-                        onChange={(e) => setOpt1Name(e.target.value.slice(0, 30))}
-                        placeholder="Size"
-                        className={`${fieldClass} h-10`}
-                      />
-                    </Field>
-                    <ChipsInput values={opt1Values} onChange={setOpt1Values} placeholder="Type a value and press Enter: S, M, L" />
-                  </div>
-                  <div className="grid gap-2">
-                    <Field label="Option 2 name (optional)">
-                      <input
-                        value={opt2Name}
-                        onChange={(e) => setOpt2Name(e.target.value.slice(0, 30))}
-                        placeholder="Color"
-                        className={`${fieldClass} h-10`}
-                      />
-                    </Field>
-                    <ChipsInput
-                      values={opt2Values}
-                      onChange={setOpt2Values}
-                      placeholder="Type a value and press Enter: Black, White"
-                    />
-                  </div>
-                </div>
-
-                {colorValues.length > 0 && (
-                  <div className="grid gap-2">
-                    <span className="text-xs text-muted-foreground">Swatch colors</span>
-                    <div className="flex flex-wrap gap-3">
-                      {colorValues.map((c) => (
-                        <label key={c} className="flex items-center gap-2 text-xs text-foreground">
-                          <input
-                            type="color"
-                            value={swatches[c] ?? guessColor(c)}
-                            onChange={(e) => setSwatches((s) => ({ ...s, [c]: e.target.value }))}
-                            className="size-8 cursor-pointer rounded-full border border-[#262626] bg-transparent p-0"
-                          />
-                          {c}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {variants.length > 0 && (
-                  <div className="overflow-x-auto rounded-xl border border-[#262626]">
-                    <table className="w-full min-w-[640px] text-left text-xs">
-                      <thead className="border-b border-[#262626] text-[11px] uppercase tracking-wider text-muted-foreground">
-                        <tr>
-                          <th className="p-3">{[opt1Name.trim() || "Option 1", opt2Values.length > 0 ? opt2Name.trim() || "Option 2" : ""].filter(Boolean).join(" / ")}</th>
-                          <th className="p-3">SKU</th>
-                          <th className="p-3">Stock</th>
-                          <th className="p-3">Price (optional)</th>
-                          <th className="p-3">Photo</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {variants.map((v, i) => (
-                          <tr key={`${v.option1}|${v.option2}`} className="border-b border-[#262626]/60">
-                            <td className="p-3 text-foreground">{[v.option1, v.option2].filter(Boolean).join(" / ")}</td>
-                            <td className="p-3">
-                              <input
-                                value={v.sku}
-                                onChange={(e) => setVariant(i, { sku: e.target.value })}
-                                placeholder="auto"
-                                className={`${inputBase} h-9 w-36 text-xs`}
-                              />
-                            </td>
-                            <td className="p-3">
-                              {v.id ? (
-                                <span className="text-muted-foreground">{v.stock} (Live Inventory)</span>
-                              ) : (
-                                <input
-                                  value={v.stock}
-                                  onChange={(e) => setVariant(i, { stock: e.target.value })}
-                                  inputMode="numeric"
-                                  className={`${inputBase} h-9 w-20 text-xs`}
-                                />
-                              )}
-                            </td>
-                            <td className="p-3">
-                              <input
-                                value={v.price}
-                                onChange={(e) => setVariant(i, { price: e.target.value })}
-                                inputMode="numeric"
-                                placeholder={form.price || "same"}
-                                className={`${inputBase} h-9 w-28 text-xs`}
-                              />
-                            </td>
-                            <td className="p-3">
-                              <select
-                                value={v.image}
-                                onChange={(e) => setVariant(i, { image: e.target.value })}
-                                className={`${inputBase} h-9 w-32 text-xs`}
-                              >
-                                <option value="" className="bg-card">
-                                  Product photos
-                                </option>
-                                {form.images.map((u, n) => (
-                                  <option key={u} value={u} className="bg-card">
-                                    Photo {n + 1}
-                                  </option>
-                                ))}
-                              </select>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-                {errors.options && <span className="text-[11px] text-red-400">{errors.options}</span>}
-              </>
-            )}
-          </div>
-
-          <div className={section}>
-            <h3 className={sectionTitle}>Description</h3>
-            <Field label="Short description (optional)" error={errors.blurb}>
-              <input value={form.blurb} onChange={set("blurb")} className={`${fieldClass} h-10`} />
-            </Field>
-            <Field label="Description (optional)" error={errors.description}>
-              <textarea value={form.description} onChange={set("description")} rows={3} className={`${fieldClass} py-2`} />
-            </Field>
-            <Field label="Tags (comma separated, optional)" error={errors.tags}>
-              <input value={form.tags} onChange={set("tags")} className={`${fieldClass} h-10`} placeholder="summer, cotton" />
-            </Field>
-          </div>
-
-          <div className={section}>
-            <h3 className={sectionTitle}>Specifications</h3>
-            <p className="-mt-2 text-[11px] text-muted-foreground">
-              Facts customers compare, such as Material, Weight or Size. SKU and Category are added automatically.
+    <AdminSheet
+      open={open}
+      onClose={onClose}
+      title={title}
+      subtitle={subtitle}
+      wide
+      fullOnPhone
+      footer={
+        <div className="grid gap-2">
+          {formError && (
+            <p role="alert" className="text-sm text-destructive">
+              {formError}
             </p>
-            {specs.map((s, i) => (
-              <div key={i} className="flex gap-2">
-                <input
-                  value={s.label}
-                  onChange={(e) => setSpecs((prev) => prev.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
-                  placeholder="Name (Material)"
-                  className={`${inputBase} h-9 w-32 shrink-0 text-xs sm:w-44`}
-                />
-                <input
-                  value={s.value}
-                  onChange={(e) => setSpecs((prev) => prev.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))}
-                  placeholder="Value (100% cotton)"
-                  className={`${inputBase} h-9 min-w-0 flex-1 text-xs`}
-                />
-                <button
-                  type="button"
-                  aria-label="Remove specification"
-                  onClick={() => setSpecs((prev) => prev.filter((_, j) => j !== i))}
-                  className="grid size-9 shrink-0 place-items-center rounded-lg text-muted-foreground hover:text-destructive"
-                >
-                  <i className="bx bx-trash text-lg" />
-                </button>
-              </div>
-            ))}
+          )}
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button type="button" onClick={onClose} className={btn.ghost}>
+              Cancel
+            </button>
+            <button type="button" disabled={saving || uploading} onClick={() => void submit()} className={btn.primary}>
+              {saving ? "Saving…" : uploading ? "Uploading photo…" : product ? "Save changes" : "Create product"}
+            </button>
+          </div>
+        </div>
+      }
+    >
+      <div className="grid gap-4">
+        <Section title="Basics">
+          <Field label="Name" error={errors.name}>
+            <input value={form.name} onChange={set("name")} className={field} placeholder="Linen shirt" autoComplete="off" enterKeyHint="next" />
+          </Field>
+          <Field label="Category" error={errors.categoryId}>
+            <select value={form.categoryId} onChange={set("categoryId")} className={field}>
+              {cats.map((c) => (
+                <option key={c.id} value={c.id} className="bg-card">
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </Section>
+
+        <Section title="Price and stock">
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Field label="Price (RWF)" error={errors.price}>
+              <input value={form.price} onChange={set("price")} inputMode="numeric" className={field} />
+            </Field>
+            <Field label="Old price (RWF, optional)" error={errors.oldPrice}>
+              <input value={form.oldPrice} onChange={set("oldPrice")} inputMode="numeric" className={field} />
+            </Field>
+            <Field label="Cost per unit (RWF)" error={errors.cost}>
+              <input value={form.cost} onChange={set("cost")} inputMode="numeric" className={field} />
+            </Field>
+          </div>
+          <p className="-mt-1 text-sm text-muted-foreground">The cost is only visible to admins and is used for finance.</p>
+          {!product && !hasOptions && (
+            <Field label="Starting stock" error={errors.stock}>
+              <input value={form.stock} onChange={set("stock")} inputMode="numeric" className={field} />
+            </Field>
+          )}
+        </Section>
+
+        <Section title="Photos" hint="The first photo is the main one. JPG, PNG or WebP, up to 5 MB each, 6 at most.">
+          {form.images.length > 0 && (
+            <ul className="grid grid-cols-3 gap-3 sm:grid-cols-4" aria-label="Photos">
+              {form.images.map((u, i) => (
+                <li key={`${i}-${u}`} className="grid gap-1.5">
+                  <div className="relative">
+                    <img src={u} alt={`Photo ${i + 1}`} className="aspect-square w-full rounded-xl object-cover" />
+                    {i === 0 && (
+                      <span className="absolute left-1.5 top-1.5 rounded-md bg-primary px-1.5 py-0.5 text-xs font-medium text-primary-foreground">
+                        Main
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex gap-1">
+                    {i !== 0 && (
+                      <button type="button" onClick={() => makeMain(i)} aria-label={`Make photo ${i + 1} the main photo`} className={cn(btn.quiet, "h-10 flex-1 px-2 text-xs")}>
+                        Make main
+                      </button>
+                    )}
+                    <button type="button" onClick={() => removeImage(i)} aria-label={`Remove photo ${i + 1}`} className={cn(btn.dangerQuiet, "h-10 flex-1 px-2 text-xs")}>
+                      Remove
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <button type="button" disabled={uploading || form.images.length >= 6} onClick={() => fileRef.current?.click()} className={btn.ghost}>
+              <i aria-hidden className="bx bx-image-add text-lg" /> {uploading ? "Uploading…" : "Choose photo"}
+            </button>
+            <button type="button" disabled={uploading || form.images.length >= 6} onClick={() => camRef.current?.click()} className={cn(btn.ghost, "md:hidden")}>
+              <i aria-hidden className="bx bx-camera text-lg" /> Take photo
+            </button>
+          </div>
+          <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" tabIndex={-1} aria-label="Photo file" onChange={(e) => void onFile(e)} />
+          <input ref={camRef} type="file" accept="image/jpeg,image/png,image/webp" capture="environment" className="sr-only" tabIndex={-1} aria-label="Camera photo" onChange={(e) => void onFile(e)} />
+          <div className="flex gap-2">
+            <input
+              value={urlInput}
+              onChange={(e) => setUrlInput(e.target.value)}
+              inputMode="url"
+              autoCapitalize="none"
+              aria-label="Photo link"
+              placeholder="Or paste a photo link (https://…)"
+              className={field}
+            />
+            <button type="button" onClick={addUrl} className={btn.ghost}>
+              Add
+            </button>
+          </div>
+          {errors.images && (
+            <p data-error="true" className="text-sm text-destructive">
+              {errors.images}
+            </p>
+          )}
+        </Section>
+
+        <Section
+          title="Options (sizes, colors…)"
+          hint="Turn this on when customers must choose, for example a size or a color. Each combination gets its own stock, and optionally its own price and photo."
+        >
+          <div className="flex items-center justify-between gap-4">
+            <span className="text-base">This product has options</span>
             <button
               type="button"
-              disabled={specs.length >= 20}
-              onClick={() => setSpecs((prev) => [...prev, { label: "", value: "" }])}
-              className="hairline h-9 w-fit rounded-xl px-3 text-xs text-foreground disabled:opacity-50"
+              role="switch"
+              aria-checked={hasOptions}
+              aria-label="This product has options"
+              onClick={() => setHasOptions((v) => !v)}
+              className={cn(
+                "relative h-8 w-14 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                hasOptions ? "bg-primary" : "bg-muted",
+              )}
             >
-              + Add specification
+              <span className={cn("absolute top-1 size-6 rounded-full bg-background transition-all", hasOptions ? "left-[30px]" : "left-1")} />
             </button>
-            {errors.specs && <span className="text-[11px] text-red-400">{errors.specs}</span>}
           </div>
 
-          <div className={section}>
-            <h3 className={sectionTitle}>Care &amp; handling</h3>
-            <Field label="How to look after it (optional)" error={errors.care}>
-              <textarea
-                value={form.care}
-                onChange={set("care")}
-                rows={3}
-                placeholder="Machine wash cold. Do not bleach. Dry in the shade."
-                className={`${fieldClass} py-2`}
+          {hasOptions && (
+            <>
+              <div className="grid gap-5 sm:grid-cols-2">
+                <div className="grid gap-2">
+                  <Field label="Option 1 name">
+                    <input value={opt1Name} onChange={(e) => setOpt1Name(e.target.value.slice(0, 30))} placeholder="Size" className={field} />
+                  </Field>
+                  <ChipsInput label="Option 1 values" values={opt1Values} onChange={setOpt1Values} placeholder="Type a value and press Enter: S, M, L" />
+                </div>
+                <div className="grid gap-2">
+                  <Field label="Option 2 name (optional)">
+                    <input value={opt2Name} onChange={(e) => setOpt2Name(e.target.value.slice(0, 30))} placeholder="Color" className={field} />
+                  </Field>
+                  <ChipsInput label="Option 2 values" values={opt2Values} onChange={setOpt2Values} placeholder="Type a value and press Enter: Black, White" />
+                </div>
+              </div>
+
+              {colorValues.length > 0 && (
+                <div className="grid gap-2">
+                  <span className="text-sm text-muted-foreground">Swatch colors</span>
+                  <div className="flex flex-wrap gap-4">
+                    {colorValues.map((c) => (
+                      <label key={c} className="flex items-center gap-2 text-sm text-foreground">
+                        <input
+                          type="color"
+                          aria-label={`Swatch color for ${c}`}
+                          value={swatches[c] ?? guessColor(c)}
+                          onChange={(e) => setSwatches((s) => ({ ...s, [c]: e.target.value }))}
+                          className="size-11 cursor-pointer rounded-full border border-[#262626] bg-transparent p-0"
+                        />
+                        {c}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {variants.length > 0 && (
+                <ul className="grid gap-3 md:grid-cols-2" aria-label="Combinations">
+                  {variants.map((v, i) => {
+                    const label = [v.option1, v.option2].filter(Boolean).join(" / ");
+                    return (
+                      <li key={`${v.option1}|${v.option2}`} className="rounded-2xl border border-[#262626] p-4">
+                        <p className="text-base font-medium">{label}</p>
+                        <div className="mt-3 grid gap-3">
+                          <Field label="SKU">
+                            <input value={v.sku} onChange={(e) => setVariant(i, { sku: e.target.value })} placeholder="auto" autoCapitalize="characters" className={field} />
+                          </Field>
+                          {v.id ? (
+                            <div>
+                              <p className="text-sm text-muted-foreground">Stock</p>
+                              <p className="text-base">{v.stock} in stock</p>
+                              <p className="text-sm text-muted-foreground">Change it on the Inventory page.</p>
+                            </div>
+                          ) : (
+                            <Field label="Stock">
+                              <input value={v.stock} onChange={(e) => setVariant(i, { stock: e.target.value })} inputMode="numeric" className={field} />
+                            </Field>
+                          )}
+                          <Field label="Price (optional)">
+                            <input value={v.price} onChange={(e) => setVariant(i, { price: e.target.value })} inputMode="numeric" placeholder={form.price || "same as the product"} className={field} />
+                          </Field>
+                          <Field label="Photo">
+                            <select value={v.image} onChange={(e) => setVariant(i, { image: e.target.value })} className={field}>
+                              <option value="" className="bg-card">
+                                Product photos
+                              </option>
+                              {form.images.map((u, n) => (
+                                <option key={u} value={u} className="bg-card">
+                                  Photo {n + 1}
+                                </option>
+                              ))}
+                            </select>
+                          </Field>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              {errors.options && (
+                <p data-error="true" className="text-sm text-destructive">
+                  {errors.options}
+                </p>
+              )}
+            </>
+          )}
+        </Section>
+
+        <Section title="Description">
+          <Field label="Short description (optional)" error={errors.blurb}>
+            <input value={form.blurb} onChange={set("blurb")} className={field} />
+          </Field>
+          <Field label="Description (optional)" error={errors.description}>
+            <textarea value={form.description} onChange={set("description")} rows={4} className={cn(field, "h-auto py-2.5")} />
+          </Field>
+          <Field label="Tags (comma separated, optional)" error={errors.tags}>
+            <input value={form.tags} onChange={set("tags")} className={field} placeholder="summer, cotton" />
+          </Field>
+        </Section>
+
+        <Section
+          title="Specifications"
+          hint="Facts customers compare, such as Material, Weight or Size. SKU and Category are added automatically."
+          fold
+          startOpen={specs.length > 0}
+        >
+          {specs.map((s, i) => (
+            <div key={i} className="grid gap-2 sm:grid-cols-[12rem_1fr_auto]">
+              <input
+                aria-label={`Specification ${i + 1} name`}
+                value={s.label}
+                onChange={(e) => setSpecs((prev) => prev.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
+                placeholder="Name (Material)"
+                className={field}
               />
-            </Field>
-          </div>
-        </div>
-
-        {formError && <p className="text-sm text-destructive">{formError}</p>}
-
-        <div className="mt-2 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <button
-            type="button"
-            onClick={onClose}
-            className="h-10 rounded-xl border border-[#262626] px-4 text-sm text-muted-foreground transition-colors hover:text-foreground"
-          >
-            Cancel
+              <input
+                aria-label={`Specification ${i + 1} value`}
+                value={s.value}
+                onChange={(e) => setSpecs((prev) => prev.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))}
+                placeholder="Value (100% cotton)"
+                className={field}
+              />
+              <button
+                type="button"
+                aria-label={`Remove specification ${i + 1}`}
+                onClick={() => setSpecs((prev) => prev.filter((_, j) => j !== i))}
+                className="grid size-11 place-items-center rounded-xl text-muted-foreground hover:text-destructive"
+              >
+                <i aria-hidden className="bx bx-trash text-xl" />
+              </button>
+            </div>
+          ))}
+          <button type="button" disabled={specs.length >= 20} onClick={() => setSpecs((prev) => [...prev, { label: "", value: "" }])} className={cn(btn.ghost, "w-fit")}>
+            <i aria-hidden className="bx bx-plus text-lg" /> Add specification
           </button>
-          <button
-            type="button"
-            disabled={saving || uploading}
-            onClick={() => void submit()}
-            className="h-10 rounded-xl bg-primary px-5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
-          >
-            {saving ? "Saving…" : product ? "Save changes" : "Create product"}
-          </button>
-        </div>
-      </DialogContent>
-    </Dialog>
+          {errors.specs && (
+            <p data-error="true" className="text-sm text-destructive">
+              {errors.specs}
+            </p>
+          )}
+        </Section>
+
+        <Section title="Care and handling" fold startOpen={form.care.trim() !== ""}>
+          <Field label="How to look after it (optional)" error={errors.care}>
+            <textarea
+              value={form.care}
+              onChange={set("care")}
+              rows={3}
+              placeholder="Machine wash cold. Do not bleach. Dry in the shade."
+              className={cn(field, "h-auto py-2.5")}
+            />
+          </Field>
+        </Section>
+      </div>
+    </AdminSheet>
   );
 }
 
-function RowActions({
-  name,
-  archived,
-  onEdit,
-  onToggle,
-}: {
-  name: string;
-  archived: boolean;
-  onEdit: () => void;
-  onToggle: () => void;
-}) {
-  const btn =
-    "grid size-9 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground";
-  return (
-    <div className="flex items-center gap-1">
-      <button type="button" aria-label={`Edit ${name}`} onClick={onEdit} className={btn}>
-        <i className="bx bx-edit text-lg" />
-      </button>
-      <button
-        type="button"
-        aria-label={`${archived ? "Restore" : "Archive"} ${name}`}
-        onClick={onToggle}
-        className={btn}
-      >
-        <i className={`bx ${archived ? "bx-archive-out" : "bx-archive"} text-lg`} />
-      </button>
-    </div>
+type View = "active" | "archived" | "all";
+type EditorState = { product?: Row | undefined; seed?: Row | undefined };
+type ConfirmState = { ids: string[]; label: string } | null;
+
+function stockPill(p: Row): { label: string; cls: string } {
+  if (p.archived_at) return { label: "Archived", cls: "bg-muted text-muted-foreground" };
+  if (p.stock <= 0) return { label: "Out of stock", cls: "bg-destructive/10 text-destructive" };
+  if (p.stock <= 5) return { label: `Low: ${p.stock} left`, cls: "bg-warning/10 text-warning" };
+  return { label: `In stock: ${p.stock}`, cls: "bg-success/10 text-success" };
+}
+
+const optionNote = (p: Row) =>
+  p.product_variants.length > 0
+    ? `${p.product_variants.length} option${p.product_variants.length === 1 ? "" : "s"}: ${[p.option1_name, p.option2_name].filter(Boolean).join(" / ")}`
+    : "";
+
+function Thumb({ p, size }: { p: Row; size: string }) {
+  return p.images[0] ? (
+    <img src={p.images[0]} alt="" className={cn("shrink-0 rounded-xl object-cover", size)} />
+  ) : (
+    <span className={cn("grid shrink-0 place-items-center rounded-xl bg-secondary text-muted-foreground", size)}>
+      <i aria-hidden className="bx bx-package text-xl" />
+    </span>
   );
 }
 
@@ -990,13 +998,17 @@ function Products() {
   const [cats, setCats] = useState<Cat[]>([]);
   const [costs, setCosts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState("");
   const [q, setQ] = usePersistedState("moa:products:q", "");
   const [cat, setCat] = usePersistedState("moa:products:cat", "All");
-  const [view, setView] = usePersistedState<"active" | "archived" | "all">("moa:products:view", "active");
+  const [view, setView] = usePersistedState<View>("moa:products:view", "active");
   const [visible, setVisible] = usePersistedState("moa:products:visible", 20);
-  const [dialog, setDialog] = usePersistedState<{ product?: Row | undefined } | null>("moa:products:dialog", null);
-  const [confirm, setConfirm] = useState<Row | null>(null);
+  const [editor, setEditor] = usePersistedState<EditorState | null>("moa:products:dialog", null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [confirm, setConfirm] = useState<ConfirmState>(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -1018,9 +1030,9 @@ function Products() {
       const map: Record<string, number> = {};
       for (const r of k.data ?? []) map[r.product_id as string] = r.cost as number;
       setCosts(map);
-      setError("");
+      setLoadError("");
     } catch {
-      setError("Could not load products. Check your connection and refresh.");
+      setLoadError("Could not load products. Check your connection and try again.");
     } finally {
       setLoading(false);
     }
@@ -1030,223 +1042,410 @@ function Products() {
     void load();
   }, [load]);
 
-  const setArchived = async (p: Row, archived: boolean) => {
-    setError("");
-    const { error: err } = await supabase
-      .from("products")
-      .update({ archived_at: archived ? new Date().toISOString() : null })
-      .eq("id", p.id);
-    if (err) {
-      setError(err.message);
+  // The editor slides in a moment after it is mounted, and out before it is removed.
+  useEffect(() => {
+    if (!editor) {
+      setEditorOpen(false);
       return;
     }
-    void load();
+    const t = setTimeout(() => setEditorOpen(true), 20);
+    return () => clearTimeout(t);
+  }, [editor]);
+
+  const openEditor = (e: EditorState) => {
+    // Starting something new or a copy: forget any unsaved draft of a previous "new" product.
+    clearPersisted(`moa:pe:${e.product?.id ?? "new"}:`);
+    setEditor(e);
+  };
+  const closeEditor = () => {
+    const key = editor?.product?.id ?? "new";
+    setEditorOpen(false);
+    setTimeout(() => {
+      clearPersisted(`moa:pe:${key}:`);
+      setEditor(null);
+    }, 320);
   };
 
-  const filtered = rows.filter((p) => {
-    const t = q.trim().toLowerCase();
-    const catName = p.category?.name ?? "";
-    return (
-      (view === "all" || (view === "archived") === Boolean(p.archived_at)) &&
-      (cat === "All" || catName === cat) &&
-      (!t || `${p.name} ${p.sku} ${catName}`.toLowerCase().includes(t))
+  const setArchived = async (ids: string[], archived: boolean) => {
+    const { error } = await supabase
+      .from("products")
+      .update({ archived_at: archived ? new Date().toISOString() : null })
+      .in("id", ids);
+    if (error) {
+      toast.error(error.message);
+      return false;
+    }
+    toast.success(
+      ids.length === 1 ? (archived ? "Product archived." : "Product restored.") : `${ids.length} products ${archived ? "archived" : "restored"}.`,
     );
+    void load();
+    return true;
+  };
+
+  const bulk = async (archived: boolean) => {
+    const ids = [...selected].filter((id) => Boolean(rows.find((r) => r.id === id)?.archived_at) !== archived);
+    if (ids.length === 0) return;
+    if (archived) {
+      setConfirm({ ids, label: `${ids.length} product${ids.length === 1 ? "" : "s"}` });
+      return;
+    }
+    setBulkBusy(true);
+    const ok = await setArchived(ids, false);
+    setBulkBusy(false);
+    if (ok) {
+      setSelected(new Set());
+      setSelectMode(false);
+    }
+  };
+
+  // ----- what is shown -----
+
+  const inView = (p: Row, v: View) => v === "all" || (v === "archived") === Boolean(p.archived_at);
+  const counts = {
+    active: rows.filter((p) => !p.archived_at).length,
+    archived: rows.filter((p) => p.archived_at).length,
+    all: rows.length,
+  };
+  const t = q.trim().toLowerCase();
+  const filtered = rows.filter((p) => {
+    const catName = p.category?.name ?? "";
+    return inView(p, view) && (cat === "All" || catName === cat) && (!t || `${p.name} ${p.sku} ${catName}`.toLowerCase().includes(t));
   });
   const shown = filtered.slice(0, visible);
 
-  const optionNote = (p: Row) =>
-    p.product_variants.length > 0
-      ? `${p.product_variants.length} option${p.product_variants.length === 1 ? "" : "s"}: ${[p.option1_name, p.option2_name].filter(Boolean).join(" / ")}`
-      : "";
+  const toggleOne = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const allShownSelected = shown.length > 0 && shown.every((p) => selected.has(p.id));
+  const toggleAll = () => setSelected(allShownSelected ? new Set() : new Set(shown.map((p) => p.id)));
+  const selectedRows = rows.filter((p) => selected.has(p.id));
+  const selActive = selectedRows.filter((p) => !p.archived_at).length;
+  const selArchived = selectedRows.length - selActive;
+
+  const menuFor = (p: Row): MenuItem[] => [
+    { label: "Edit", icon: "bx-edit", onSelect: () => openEditor({ product: p }) },
+    { label: "Duplicate", icon: "bx-copy", onSelect: () => openEditor({ seed: p }), hint: "Start a new product from this one" },
+    p.archived_at
+      ? { label: "Restore", icon: "bx-archive-out", onSelect: () => void setArchived([p.id], false), hint: "Show it on the storefront again" }
+      : {
+          label: "Archive",
+          icon: "bx-archive",
+          danger: true,
+          onSelect: () => setConfirm({ ids: [p.id], label: `"${p.name}"` }),
+          hint: "Hide it from the storefront",
+        },
+  ];
+
+  const tabs: TabItem<View>[] = [
+    { key: "active", label: "Active", count: counts.active },
+    { key: "archived", label: "Archived", count: counts.archived },
+    { key: "all", label: "All", count: counts.all },
+  ];
 
   return (
     <>
       <PageHead
-        title="Product Management"
+        title="Products"
         subtitle="Create, edit and archive products. Changes go live on the storefront right away."
+        actions={
+          isAdmin ? (
+            <>
+              <button
+                type="button"
+                aria-pressed={selectMode}
+                onClick={() => {
+                  setSelectMode((v) => !v);
+                  setSelected(new Set());
+                }}
+                className={cn(btn.ghost, "lg:hidden", selectMode && "border-foreground/60 bg-white/10")}
+              >
+                <i aria-hidden className="bx bx-check-square text-lg" /> {selectMode ? "Done" : "Select"}
+              </button>
+              <button type="button" onClick={() => openEditor({})} className={btn.primary}>
+                <i aria-hidden className="bx bx-plus text-lg" /> Add product
+              </button>
+            </>
+          ) : undefined
+        }
       />
 
-      <div className="mb-5 flex flex-wrap gap-3">
-        <div className="relative min-w-56 flex-1">
-          <i className="bx bx-search pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input
+      <div className="grid gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <SearchField
             value={q}
-            onChange={(e) => {
-              setQ(e.target.value);
+            onChange={(v) => {
+              setQ(v);
               setVisible(20);
             }}
+            label="Search products"
             placeholder="Search name, SKU or category"
-            className="hairline h-10 w-full rounded-xl bg-card/60 pl-9 pr-3 text-sm outline-none focus:neon-ring"
           />
-        </div>
-        <select
-          value={cat}
-          onChange={(e) => {
-            setCat(e.target.value);
-            setVisible(20);
-          }}
-          className="hairline h-10 rounded-xl bg-card/60 px-3 text-sm outline-none"
-        >
-          {["All", ...cats.map((c) => c.name)].map((c) => (
-            <option key={c} value={c} className="bg-card">
-              {c}
-            </option>
-          ))}
-        </select>
-        <select
-          value={view}
-          onChange={(e) => {
-            setView(e.target.value as "active" | "archived" | "all");
-            setVisible(20);
-          }}
-          className="hairline h-10 rounded-xl bg-card/60 px-3 text-sm outline-none"
-        >
-          <option value="active" className="bg-card">
-            Active
-          </option>
-          <option value="archived" className="bg-card">
-            Archived
-          </option>
-          <option value="all" className="bg-card">
-            All
-          </option>
-        </select>
-        {isAdmin && (
-          <button
-            type="button"
-            onClick={() => setDialog({})}
-            className="flex h-10 items-center gap-2 rounded-xl bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+          <select
+            aria-label="Category"
+            value={cat}
+            onChange={(e) => {
+              setCat(e.target.value);
+              setVisible(20);
+            }}
+            className={cn(field, "sm:w-52")}
           >
-            <i className="bx bx-plus text-lg" /> Add product
+            {["All", ...cats.map((c) => c.name)].map((c) => (
+              <option key={c} value={c} className="bg-card">
+                {c === "All" ? "All categories" : c}
+              </option>
+            ))}
+          </select>
+        </div>
+        <FilterTabs
+          items={tabs}
+          value={view}
+          onChange={(v) => {
+            setView(v);
+            setVisible(20);
+            setSelected(new Set());
+          }}
+          label="Show"
+        />
+      </div>
+
+      {!isAdmin && <p className="mt-3 text-sm text-muted-foreground">Only admins can add, edit or archive products.</p>}
+
+      {selectMode && isAdmin && shown.length > 0 && (
+        <div className="mt-4 flex items-center justify-between gap-3 text-sm lg:hidden">
+          <span className="text-muted-foreground">
+            {selected.size} of {shown.length} selected
+          </span>
+          <button type="button" onClick={toggleAll} className="min-h-11 px-2 text-foreground underline-offset-4 hover:underline">
+            {allShownSelected ? "Clear selection" : "Select all shown"}
           </button>
+        </div>
+      )}
+
+      <div className="mt-4">
+        {loadError && (
+          <div className="rounded-2xl border border-destructive/40 bg-destructive/10 p-5 text-sm">
+            <p className="text-destructive">{loadError}</p>
+            <button type="button" onClick={() => void load()} className={cn(btn.ghost, "mt-3")}>
+              Try again
+            </button>
+          </div>
+        )}
+
+        {loading && !loadError && (
+          <ul className="grid gap-3 md:grid-cols-2 lg:grid-cols-1" aria-label="Loading products">
+            {[0, 1, 2, 3].map((i) => (
+              <li key={i} className="flex gap-3 rounded-2xl border border-[#262626] bg-card p-4">
+                <Skeleton className="size-20 rounded-xl" />
+                <div className="flex-1">
+                  <Skeleton className="h-5 w-40" />
+                  <Skeleton className="mt-3 h-4 w-28" />
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {!loading && !loadError && filtered.length === 0 && (
+          <div className="rounded-2xl border border-[#262626] bg-card">
+            {rows.length === 0 ? (
+              <EmptyState
+                icon="bx-package"
+                title="No products yet"
+                hint="Add the first product to start selling."
+                action={
+                  isAdmin ? (
+                    <button type="button" className={btn.primary} onClick={() => openEditor({})}>
+                      Add product
+                    </button>
+                  ) : undefined
+                }
+              />
+            ) : (
+              <EmptyState
+                icon="bx-search"
+                title="No products match"
+                hint="Try a different word, category or view."
+                action={
+                  <button
+                    type="button"
+                    className={btn.ghost}
+                    onClick={() => {
+                      setQ("");
+                      setCat("All");
+                      setView("active");
+                    }}
+                  >
+                    Clear filters
+                  </button>
+                }
+              />
+            )}
+          </div>
+        )}
+
+        {shown.length > 0 && (
+          <>
+            <ul className="grid gap-3 md:grid-cols-2 lg:hidden" aria-label="Products">
+              {shown.map((p) => {
+                const s = stockPill(p);
+                return (
+                  <li key={p.id} className={cn("rounded-2xl border bg-card p-4", selected.has(p.id) ? "border-foreground/60" : "border-[#262626]")}>
+                    <div className="flex items-start gap-3">
+                      {selectMode && isAdmin && (
+                        <label className="grid min-h-11 min-w-8 place-items-center">
+                          <input type="checkbox" className="size-5" aria-label={`Select ${p.name}`} checked={selected.has(p.id)} onChange={() => toggleOne(p.id)} />
+                        </label>
+                      )}
+                      <Thumb p={p} size="size-20" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-base">{p.name}</p>
+                        <p className="truncate text-sm text-muted-foreground">
+                          {p.sku} · {p.category?.name ?? "—"}
+                        </p>
+                        {optionNote(p) && <p className="truncate text-sm text-muted-foreground">{optionNote(p)}</p>}
+                        <p className="mt-1 font-display text-base font-semibold">{money(p.price)}</p>
+                      </div>
+                      {isAdmin && <ActionMenu label={`Actions for ${p.name}`} items={menuFor(p)} />}
+                    </div>
+                    <div className="mt-3 flex items-center justify-between gap-3">
+                      <span className={cn("whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium", s.cls)}>{s.label}</span>
+                      {isAdmin && (
+                        <button type="button" onClick={() => openEditor({ product: p })} className={btn.ghost}>
+                          Edit
+                        </button>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+
+            <div className="hidden overflow-hidden rounded-2xl border border-[#262626] bg-card lg:block">
+              <table className="w-full table-fixed text-left text-sm">
+                <colgroup>
+                  {isAdmin && <col className="w-12" />}
+                  <col />
+                  <col className="w-36" />
+                  <col className="w-32" />
+                  <col className="w-32" />
+                  <col className="w-40" />
+                  {isAdmin && <col className="w-16" />}
+                </colgroup>
+                <thead className="border-b border-[#262626] text-xs font-medium text-muted-foreground">
+                  <tr>
+                    {isAdmin && (
+                      <th className="py-3 pl-4">
+                        <input type="checkbox" className="size-4" aria-label="Select all shown products" checked={allShownSelected} onChange={toggleAll} />
+                      </th>
+                    )}
+                    <th className="px-3 py-3 font-medium">Product</th>
+                    <th className="px-3 py-3 font-medium">SKU</th>
+                    <th className="px-3 py-3 font-medium">Category</th>
+                    <th className="px-3 py-3 font-medium">Price</th>
+                    <th className="px-3 py-3 font-medium">Stock</th>
+                    {isAdmin && (
+                      <th className="px-3 py-3">
+                        <span className="sr-only">Actions</span>
+                      </th>
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {shown.map((p) => {
+                    const s = stockPill(p);
+                    return (
+                      <tr key={p.id} className="border-b border-[#262626]/70 align-middle last:border-0 hover:bg-white/[0.03]">
+                        {isAdmin && (
+                          <td className="py-3 pl-4">
+                            <input type="checkbox" className="size-4" aria-label={`Select ${p.name}`} checked={selected.has(p.id)} onChange={() => toggleOne(p.id)} />
+                          </td>
+                        )}
+                        <td className="px-3 py-3">
+                          <div className="flex items-center gap-3">
+                            <Thumb p={p} size="size-12" />
+                            <div className="min-w-0">
+                              {isAdmin ? (
+                                <button
+                                  type="button"
+                                  onClick={() => openEditor({ product: p })}
+                                  className="block max-w-full truncate text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                >
+                                  {p.name}
+                                </button>
+                              ) : (
+                                <p className="truncate">{p.name}</p>
+                              )}
+                              {optionNote(p) && <p className="truncate text-xs text-muted-foreground">{optionNote(p)}</p>}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="truncate px-3 py-3 text-muted-foreground">{p.sku}</td>
+                        <td className="truncate px-3 py-3 text-muted-foreground">{p.category?.name ?? "—"}</td>
+                        <td className="px-3 py-3 font-medium">{money(p.price)}</td>
+                        <td className="px-3 py-3">
+                          <span className={cn("whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium", s.cls)}>{s.label}</span>
+                        </td>
+                        {isAdmin && (
+                          <td className="px-2 py-1 text-right">
+                            <ActionMenu label={`Actions for ${p.name}`} items={menuFor(p)} />
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="mt-5 flex flex-col items-center gap-3">
+              <p className="text-sm text-muted-foreground">
+                Showing {shown.length} of {filtered.length} products
+              </p>
+              {filtered.length > visible && (
+                <button type="button" onClick={() => setVisible(visible + 20)} className={btn.ghost}>
+                  Show more
+                </button>
+              )}
+            </div>
+          </>
         )}
       </div>
 
-      {!isAdmin && <p className="mb-4 text-xs text-muted-foreground">Only admins can add, edit or archive products.</p>}
-      {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
+      <ActionBar show={selected.size > 0 && isAdmin}>
+        <span className="mr-auto px-1 text-sm">{selected.size} selected</span>
+        <button type="button" onClick={() => setSelected(new Set())} className={btn.quiet}>
+          Clear
+        </button>
+        {selArchived > 0 && (
+          <button type="button" disabled={bulkBusy} onClick={() => void bulk(false)} className={btn.ghost}>
+            Restore ({selArchived})
+          </button>
+        )}
+        {selActive > 0 && (
+          <button type="button" disabled={bulkBusy} onClick={() => void bulk(true)} className={btn.primary}>
+            Archive ({selActive})
+          </button>
+        )}
+      </ActionBar>
 
-      {!loading && filtered.length === 0 ? (
-        <Panel>
-          <p className="py-8 text-center text-sm text-muted-foreground">No products match your search.</p>
-        </Panel>
-      ) : (
-        <>
-          <Panel className="hidden overflow-x-auto p-0 lg:block">
-            <table className="w-full text-left text-sm">
-              <thead className="border-b border-[#262626] text-[11px] uppercase tracking-wider text-muted-foreground">
-                <tr>
-                  <th className="p-4">Product</th>
-                  <th className="p-4">SKU</th>
-                  <th className="p-4">Category</th>
-                  <th className="p-4">Price</th>
-                  <th className="p-4">Stock</th>
-                  <th className="p-4">Status</th>
-                  {isAdmin && <th className="p-4 text-right">Actions</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {shown.map((p) => {
-                  const s = stockState(p.stock);
-                  return (
-                    <tr key={p.id} className="border-b border-[#262626]/60 transition-colors hover:bg-secondary/30">
-                      <td className="p-4">
-                        <div className="flex items-center gap-3">
-                          {p.images[0] && <img src={p.images[0]} alt={p.name} className="size-11 rounded-lg object-cover" />}
-                          <div>
-                            <p className="text-xs">{p.name}</p>
-                            {optionNote(p) && <p className="text-[11px] text-muted-foreground">{optionNote(p)}</p>}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="p-4 text-xs text-muted-foreground">{p.sku}</td>
-                      <td className="p-4 text-xs text-muted-foreground">{p.category?.name ?? "—"}</td>
-                      <td className="p-4 text-xs text-primary">{money(p.price)}</td>
-                      <td className="p-4 text-xs">{p.stock}</td>
-                      <td className={`p-4 text-[11px] ${p.archived_at ? "text-muted-foreground" : s.cls}`}>
-                        {p.archived_at ? "Archived" : s.label}
-                      </td>
-                      {isAdmin && (
-                        <td className="p-4">
-                          <div className="flex justify-end">
-                            <RowActions
-                              name={p.name}
-                              archived={Boolean(p.archived_at)}
-                              onEdit={() => setDialog({ product: p })}
-                              onToggle={() => (p.archived_at ? void setArchived(p, false) : setConfirm(p))}
-                            />
-                          </div>
-                        </td>
-                      )}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </Panel>
-
-          <div className="grid gap-3 sm:grid-cols-2 lg:hidden">
-            {shown.map((p) => {
-              const s = stockState(p.stock);
-              return (
-                <div key={p.id} className="glass rounded-2xl p-4">
-                  <div className="flex gap-3">
-                    {p.images[0] && <img src={p.images[0]} alt={p.name} className="size-16 shrink-0 rounded-xl object-cover" />}
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm">{p.name}</p>
-                      <p className="mt-0.5 text-[11px] text-muted-foreground">
-                        {p.sku} · {p.category?.name ?? "—"}
-                      </p>
-                      {optionNote(p) && <p className="text-[11px] text-muted-foreground">{optionNote(p)}</p>}
-                      <p className="mt-1 text-sm text-primary">{money(p.price)}</p>
-                    </div>
-                  </div>
-                  <div className="mt-3 flex items-center justify-between">
-                    <span className={`text-[11px] ${p.archived_at ? "text-muted-foreground" : s.cls}`}>
-                      {p.archived_at ? "Archived" : `${s.label} · ${p.stock}`}
-                    </span>
-                    {isAdmin && (
-                      <RowActions
-                        name={p.name}
-                        archived={Boolean(p.archived_at)}
-                        onEdit={() => setDialog({ product: p })}
-                        onToggle={() => (p.archived_at ? void setArchived(p, false) : setConfirm(p))}
-                      />
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="mt-4 flex items-center justify-between gap-3 text-xs text-muted-foreground md:mb-20">
-            <span>
-              Showing {shown.length} of {filtered.length} products
-            </span>
-            {filtered.length > visible && (
-              <button
-                type="button"
-                onClick={() => setVisible(visible + 20)}
-                className="hairline rounded-xl px-4 py-2 transition-colors hover:text-foreground"
-              >
-                Load more
-              </button>
-            )}
-          </div>
-        </>
-      )}
-
-      {dialog && (
-        <ProductDialog
-          key={dialog.product?.id ?? "new"}
-          product={dialog.product}
+      {editor && (
+        <ProductEditor
+          key={editor.product?.id ?? (editor.seed ? `copy-${editor.seed.id}` : "new")}
+          open={editorOpen}
+          product={editor.product}
+          seed={editor.seed}
           cats={cats}
           rows={rows}
           costs={costs}
-          onClose={() => {
-            clearPersisted(`moa:pe:${dialog.product?.id ?? "new"}:`);
-            setDialog(null);
+          onClose={closeEditor}
+          onSaved={() => {
+            toast.success(editor.product ? "Product saved." : "Product created.");
+            void load();
           }}
-          onSaved={() => void load()}
         />
       )}
 
@@ -1258,18 +1457,27 @@ function Products() {
       >
         <AlertDialogContent className="moa-admin-dialog rounded-2xl border-[#262626]">
           <AlertDialogHeader>
-            <AlertDialogTitle>Archive this product?</AlertDialogTitle>
+            <AlertDialogTitle>Archive {confirm && confirm.ids.length > 1 ? "these products" : "this product"}?</AlertDialogTitle>
             <AlertDialogDescription>
               {confirm
-                ? `"${confirm.name}" will disappear from the storefront. Past orders and stock history stay. You can restore it any time.`
+                ? `${confirm.label} will disappear from the storefront. Past orders and stock history stay. You can restore ${confirm.ids.length > 1 ? "them" : "it"} any time.`
                 : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel className="h-11">Cancel</AlertDialogCancel>
             <AlertDialogAction
+              className="h-11"
               onClick={() => {
-                if (confirm) void setArchived(confirm, true);
+                if (!confirm) return;
+                const ids = confirm.ids;
+                setConfirm(null);
+                void setArchived(ids, true).then((ok) => {
+                  if (ok) {
+                    setSelected(new Set());
+                    setSelectMode(false);
+                  }
+                });
               }}
             >
               Archive
