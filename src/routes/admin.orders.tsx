@@ -2,6 +2,7 @@ import { FunctionsHttpError } from "@supabase/supabase-js";
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { ActionMenu, type MenuItem } from "@/components/admin/ActionMenu";
 import { ActionBar, btn, Detail, FilterTabs, SearchField, field, type TabItem } from "@/components/admin/controls";
 import { AdminSheet } from "@/components/admin/AdminSheet";
 import { EmptyState, PageHead, Skeleton } from "@/components/moa/ui";
@@ -18,6 +19,7 @@ import {
   shortWhen,
   toCsv,
   useDebouncedValue,
+  useLongPress,
 } from "@/lib/adminTools";
 import { useAuth } from "@/lib/auth";
 import { usePersistedState } from "@/lib/persist";
@@ -26,6 +28,10 @@ import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/admin/orders")({
+  // /admin/orders?q=MOA-4860 opens the list already searched for that order.
+  validateSearch: (s: Record<string, unknown>): { q?: string | undefined } => ({
+    q: typeof s["q"] === "string" && s["q"] !== "" ? s["q"] : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "Orders — MOA Mart Suite" },
@@ -336,6 +342,121 @@ function CancelDialog({ order, onClose, onDone }: { order: Row; onClose: () => v
   );
 }
 
+/** Cancel several orders at once, with one reason. Paid orders are refunded, one by one, by the same function as a single cancel. */
+function BulkCancelDialog({ orders, onClose, onDone }: { orders: Row[]; onClose: () => void; onDone: (msg: string, failed: boolean) => void }) {
+  const paid = orders.filter((o) => o.payment_status === "paid");
+  const [choice, setChoice] = useState(REASONS[0] ?? "Other");
+  const [text, setText] = useState("");
+  const [restock, setRestock] = useState(!orders.some((o) => o.fulfilment_status === "out_for_delivery"));
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(0);
+  const [error, setError] = useState("");
+
+  const submit = async () => {
+    const detail = text.trim();
+    const reason = choice === "Other" ? detail : detail ? `${choice} — ${detail}` : choice;
+    if (!reason) {
+      setError("Please give a reason.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    let cancelled = 0;
+    let refundFailed = 0;
+    const problems: string[] = [];
+    for (const o of orders) {
+      const r = await callFn<{ refund?: string }>("cancel-order", {
+        action: "cancel",
+        order_code: o.code,
+        reason,
+        restock: o.payment_status === "paid" ? restock : false,
+      });
+      setDone((n) => n + 1);
+      if (r.error) problems.push(`${o.code}: ${r.error}`);
+      else {
+        cancelled += 1;
+        if (r.data?.refund === "failed") refundFailed += 1;
+      }
+    }
+    setBusy(false);
+    const parts = [`${cancelled} of ${orders.length} cancelled.`];
+    if (refundFailed > 0) parts.push(`${refundFailed} refund${refundFailed === 1 ? "" : "s"} did not start: retry from the order.`);
+    if (problems.length > 0) parts.push(`Not cancelled: ${problems.join("; ")}`);
+    onDone(parts.join(" "), problems.length > 0 || refundFailed > 0);
+  };
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(o) => {
+        if (!o && !busy) onClose();
+      }}
+    >
+      <DialogContent className="moa-admin-dialog max-h-[90dvh] w-[calc(100%-1.5rem)] overflow-y-auto rounded-2xl border-[#262626] sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>
+            Cancel {orders.length} order{orders.length === 1 ? "" : "s"}?
+          </DialogTitle>
+          <DialogDescription>
+            {paid.length > 0
+              ? `${paid.length} of them ${paid.length === 1 ? "is" : "are"} paid and will be refunded in full to the number that paid. Orders are never deleted: a cancelled order stays in your records.`
+              : "None of them has been paid. Reserved items go back in stock. Orders are never deleted: a cancelled order stays in your records."}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4">
+          <div className="grid gap-2">
+            <span className="text-sm text-muted-foreground">Reason (the customers will see it)</span>
+            <div className="flex flex-wrap gap-2">
+              {REASONS.map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  aria-pressed={choice === r}
+                  onClick={() => setChoice(r)}
+                  className={cn(
+                    "min-h-10 rounded-full border px-3.5 text-sm transition-colors",
+                    choice === r ? "border-foreground/60 bg-white/10 text-foreground" : "border-[#262626] text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+            <textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              rows={2}
+              maxLength={200}
+              placeholder={choice === "Other" ? "Write the reason" : "More detail (optional)"}
+              className={cn(field, "h-auto py-2.5")}
+            />
+          </div>
+          {paid.length > 0 && (
+            <label className="flex items-start gap-3 text-sm text-muted-foreground">
+              <input type="checkbox" checked={restock} onChange={(e) => setRestock(e.target.checked)} className="mt-0.5 size-5" />
+              <span>Put the items of the paid orders back in stock.</span>
+            </label>
+          )}
+        </div>
+        {busy && (
+          <p className="text-sm text-muted-foreground" role="status">
+            Cancelling… {done} of {orders.length}
+          </p>
+        )}
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        <div className="mt-2 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button type="button" disabled={busy} onClick={onClose} className={btn.ghost}>
+            Keep the orders
+          </button>
+          <button type="button" disabled={busy} onClick={() => void submit()} className={btn.danger}>
+            {busy ? "Cancelling…" : `Cancel ${orders.length} order${orders.length === 1 ? "" : "s"}`}
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ---------- pieces of the list ----------
 
 function Thumbs({ items }: { items: Item[] }) {
@@ -401,22 +522,26 @@ function PrimaryAction({ o, h }: { o: Row; h: Handlers }) {
   );
 }
 
+type Press = ReturnType<typeof useLongPress>;
+
 function OrderCard({
   o,
   h,
   selectMode,
   selected,
   onToggle,
+  press,
 }: {
   o: Row;
   h: Handlers;
   selectMode: boolean;
   selected: boolean;
   onToggle: () => void;
+  press: Press;
 }) {
   const stage = stageOf(o);
   const when = whenLine(o);
-  const selectable = selectMode && o.fulfilment_status === "confirmed";
+  const selectable = selectMode;
   return (
     <li className={cn("rounded-2xl border bg-card", selected ? "border-foreground/60" : "border-[#262626]")}>
       <div className="flex items-start">
@@ -427,9 +552,10 @@ function OrderCard({
         )}
         <button
           type="button"
-          onClick={() => h.open(o)}
+          onClick={() => (selectMode ? onToggle() : h.open(o))}
           aria-label={`Open ${o.code}`}
-          className="min-w-0 flex-1 rounded-2xl p-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          {...press(o.id)}
+          className="min-w-0 flex-1 select-none rounded-2xl p-4 text-left [-webkit-touch-callout:none] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
@@ -470,7 +596,7 @@ function OrderTable({
   onToggle,
   onToggleAll,
   allSelected,
-  anyDispatchable,
+  press,
 }: {
   rows: Row[];
   h: Handlers;
@@ -478,7 +604,7 @@ function OrderTable({
   onToggle: (id: string) => void;
   onToggleAll: () => void;
   allSelected: boolean;
-  anyDispatchable: boolean;
+  press: Press;
 }) {
   return (
     <div className="overflow-hidden rounded-2xl border border-[#262626] bg-card">
@@ -495,9 +621,7 @@ function OrderTable({
         <thead className="border-b border-[#262626] text-xs font-medium text-muted-foreground">
           <tr>
             <th className="py-3 pl-4">
-              {anyDispatchable && (
-                <input type="checkbox" className="size-4" aria-label="Select all orders to dispatch" checked={allSelected} onChange={onToggleAll} />
-              )}
+              <input type="checkbox" className="size-4" aria-label="Select all orders shown" checked={allSelected} onChange={onToggleAll} />
             </th>
             <th className="px-3 py-3 font-medium">Order</th>
             <th className="px-3 py-3 font-medium">Customer</th>
@@ -518,9 +642,7 @@ function OrderTable({
                 className="cursor-pointer border-b border-[#262626]/70 align-middle transition-colors last:border-0 hover:bg-white/[0.03]"
               >
                 <td className="py-3 pl-4" onClick={(e) => e.stopPropagation()}>
-                  {o.fulfilment_status === "confirmed" && (
-                    <input type="checkbox" className="size-4" aria-label={`Select ${o.code}`} checked={selected.has(o.id)} onChange={() => onToggle(o.id)} />
-                  )}
+                  <input type="checkbox" className="size-4" aria-label={`Select ${o.code}`} checked={selected.has(o.id)} onChange={() => onToggle(o.id)} />
                 </td>
                 <td className="px-3 py-3">
                   <button
@@ -529,7 +651,8 @@ function OrderTable({
                       e.stopPropagation();
                       h.open(o);
                     }}
-                    className="font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    {...press(o.id)}
+                    className="select-none font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     {o.code}
                   </button>
@@ -712,10 +835,20 @@ function OrderDetails({ o, shown, onShow }: { o: Row; shown: boolean; onShow: ()
 
 function Orders() {
   const { isAdmin } = useAuth();
+  const { q: linkedSearch } = Route.useSearch();
   const [tab, setTab] = usePersistedState<Tab>("moa:orders:tab", "confirmed");
   const [range, setRange] = usePersistedState<Range>("moa:orders:range", "all");
   const [term, setTerm] = usePersistedState("moa:orders:q", "");
   const debounced = useDebouncedValue(term);
+
+  // Arriving from a link: search for it, in every status and every date.
+  useEffect(() => {
+    if (!linkedSearch) return;
+    setTerm(linkedSearch);
+    setTab("all");
+    setRange("all");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkedSearch]);
 
   const [rows, setRows] = useState<Row[]>([]);
   const [total, setTotal] = useState(0);
@@ -728,6 +861,7 @@ function Orders() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busyId, setBusyId] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkCancel, setBulkCancel] = useState<Row[] | null>(null);
   const [exporting, setExporting] = useState(false);
   const [cancelFor, setCancelFor] = useState<Row | null>(null);
   const [phoneShown, setPhoneShown] = useState<Set<string>>(new Set());
@@ -817,25 +951,24 @@ function Orders() {
     void load();
   };
 
-  const dispatchSelected = async () => {
-    const ids = [...selected];
+  /** Change the status of every selected order that is in the right status. */
+  const moveSelected = async (from: "confirmed" | "out_for_delivery", to: "out_for_delivery" | "delivered", done: string) => {
+    const ids = selRows.filter((o) => o.fulfilment_status === from).map((o) => o.id);
     if (ids.length === 0) return;
     setBulkBusy(true);
-    const { error } = await supabase
-      .from("orders")
-      .update({ fulfilment_status: "out_for_delivery" })
-      .in("id", ids)
-      .eq("fulfilment_status", "confirmed");
+    const { error } = await supabase.from("orders").update({ fulfilment_status: to }).in("id", ids).eq("fulfilment_status", from);
     setBulkBusy(false);
     if (error) {
       toast.error(error.message);
       return;
     }
-    toast.success(`${ids.length} order${ids.length === 1 ? "" : "s"} marked out for delivery.`);
+    toast.success(`${ids.length} order${ids.length === 1 ? "" : "s"} ${done}.`);
     setSelected(new Set());
     setSelectMode(false);
     void load();
   };
+  const dispatchSelected = () => moveSelected("confirmed", "out_for_delivery", "marked out for delivery");
+  const deliverSelected = () => moveSelected("out_for_delivery", "delivered", "marked delivered");
 
   const refundAction = async (o: Row, action: "refund-status" | "retry-refund") => {
     setBusyId(o.id);
@@ -862,6 +995,31 @@ function Orders() {
     if (!openPrintable(notesHtml(list))) toast.error("Your browser blocked the print page. Allow pop-ups for this site and try again.");
   };
 
+  const downloadCsv = (list: Row[]) => {
+    const out: Array<Array<string | number | null | undefined>> = [
+      ["Order", "Placed", "Paid", "Customer", "Phone", "Address", "Preferred time", "Note", "Items", "Total (RWF)", "Payment", "Status", "Refund", "Cancel reason"],
+      ...list.map((o) => [
+        o.code,
+        new Date(o.created_at).toLocaleString(),
+        o.paid_at ? new Date(o.paid_at).toLocaleString() : "",
+        csvSafe(o.customer_name),
+        // Staff get a hidden number in the file, the same as on the screen.
+        isAdmin ? o.phone : maskPhone(o.phone),
+        csvSafe(o.location),
+        csvSafe(o.preferred_time ?? ""),
+        csvSafe(o.notes ?? ""),
+        csvSafe(o.order_items.map((i) => `${i.qty}× ${i.name}${i.variant_label ? ` (${i.variant_label})` : ""}`).join("; ")),
+        o.total,
+        o.payment_status,
+        stageOf(o).label,
+        o.refund_status === "none" ? "" : o.refund_status,
+        csvSafe(o.cancel_reason ?? ""),
+      ]),
+    ];
+    downloadText(`moa-orders-${new Date().toISOString().slice(0, 10)}.csv`, toCsv(out));
+    toast.success(`${list.length} order${list.length === 1 ? "" : "s"} exported.`);
+  };
+
   const exportCsv = async () => {
     setExporting(true);
     try {
@@ -871,29 +1029,7 @@ function Orders() {
         true,
       );
       if (res.error) throw res.error;
-      const list = (res.data ?? []) as unknown as Row[];
-      const out: Array<Array<string | number | null | undefined>> = [
-        ["Order", "Placed", "Paid", "Customer", "Phone", "Address", "Preferred time", "Note", "Items", "Total (RWF)", "Payment", "Status", "Refund", "Cancel reason"],
-        ...list.map((o) => [
-          o.code,
-          new Date(o.created_at).toLocaleString(),
-          o.paid_at ? new Date(o.paid_at).toLocaleString() : "",
-          csvSafe(o.customer_name),
-          // Staff get a hidden number in the file, the same as on the screen.
-          isAdmin ? o.phone : maskPhone(o.phone),
-          csvSafe(o.location),
-          csvSafe(o.preferred_time ?? ""),
-          csvSafe(o.notes ?? ""),
-          csvSafe(o.order_items.map((i) => `${i.qty}× ${i.name}${i.variant_label ? ` (${i.variant_label})` : ""}`).join("; ")),
-          o.total,
-          o.payment_status,
-          stageOf(o).label,
-          o.refund_status === "none" ? "" : o.refund_status,
-          csvSafe(o.cancel_reason ?? ""),
-        ]),
-      ];
-      downloadText(`moa-orders-${new Date().toISOString().slice(0, 10)}.csv`, toCsv(out));
-      toast.success(`${list.length} order${list.length === 1 ? "" : "s"} exported.`);
+      downloadCsv((res.data ?? []) as unknown as Row[]);
     } catch {
       toast.error("Could not export the orders. Please try again.");
     } finally {
@@ -906,8 +1042,15 @@ function Orders() {
   const canCancel = (o: Row) =>
     ["pending", "confirmed", "out_for_delivery"].includes(o.fulfilment_status) && (o.payment_status !== "paid" || isAdmin);
 
-  const dispatchable = rows.filter((o) => o.fulfilment_status === "confirmed");
-  const allSelected = dispatchable.length > 0 && dispatchable.every((o) => selected.has(o.id));
+  const selRows = rows.filter((o) => selected.has(o.id));
+  const nDispatch = selRows.filter((o) => o.fulfilment_status === "confirmed").length;
+  const nDeliver = selRows.filter((o) => o.fulfilment_status === "out_for_delivery").length;
+  const cancellable = selRows.filter(canCancel);
+  const allSelected = rows.length > 0 && rows.every((o) => selected.has(o.id));
+  const press = useLongPress((id) => {
+    setSelectMode(true);
+    setSelected(new Set([id]));
+  });
   const toggleOne = (id: string) =>
     setSelected((prev) => {
       const next = new Set(prev);
@@ -915,7 +1058,7 @@ function Orders() {
       else next.add(id);
       return next;
     });
-  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(dispatchable.map((o) => o.id)));
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(rows.map((o) => o.id)));
 
   const open = (o: Row) => {
     lastSheetRow.current = o;
@@ -968,7 +1111,7 @@ function Orders() {
                 setSelectMode((v) => !v);
                 setSelected(new Set());
               }}
-              className={cn(btn.ghost, "lg:hidden", selectMode && "border-foreground/60 bg-white/10")}
+              className={cn(btn.ghost, selectMode && "border-foreground/60 bg-white/10")}
             >
               <i aria-hidden className="bx bx-check-square text-lg" /> {selectMode ? "Done" : "Select"}
             </button>
@@ -981,7 +1124,7 @@ function Orders() {
 
       <div className="grid gap-3">
         <div className="flex flex-col gap-3 sm:flex-row">
-          <SearchField value={term} onChange={setTerm} label="Search orders" placeholder="Search by order number, name or phone" />
+          <SearchField value={term} onChange={setTerm} label="Search orders" placeholder="Number, name or phone" />
           <select
             aria-label="Date range"
             value={range}
@@ -998,11 +1141,13 @@ function Orders() {
         <FilterTabs items={tabs} value={tab} onChange={setTab} label="Order status" />
       </div>
 
-      {selectMode && dispatchable.length > 0 && (
+      {selectMode && rows.length > 0 && (
         <div className="mt-4 flex items-center justify-between gap-3 text-sm lg:hidden">
-          <span className="text-muted-foreground">{selected.size} of {dispatchable.length} selected</span>
+          <span className="text-muted-foreground">
+            {selected.size === 0 ? "Tap orders to select them" : `${selected.size} of ${rows.length} selected`}
+          </span>
           <button type="button" onClick={toggleAll} className="min-h-11 px-2 text-foreground underline-offset-4 hover:underline">
-            {allSelected ? "Clear selection" : "Select all to dispatch"}
+            {allSelected ? "Clear selection" : "Select all shown"}
           </button>
         </div>
       )}
@@ -1070,7 +1215,7 @@ function Orders() {
           <>
             <ul className="grid gap-3 md:grid-cols-2 lg:hidden" aria-label="Orders">
               {rows.map((o) => (
-                <OrderCard key={o.id} o={o} h={handlers} selectMode={selectMode} selected={selected.has(o.id)} onToggle={() => toggleOne(o.id)} />
+                <OrderCard key={o.id} o={o} h={handlers} selectMode={selectMode} selected={selected.has(o.id)} onToggle={() => toggleOne(o.id)} press={press} />
               ))}
             </ul>
             <div className="hidden lg:block">
@@ -1081,7 +1226,7 @@ function Orders() {
                 onToggle={toggleOne}
                 onToggleAll={toggleAll}
                 allSelected={allSelected}
-                anyDispatchable={dispatchable.length > 0}
+                press={press}
               />
             </div>
             <div className="mt-5 flex flex-col items-center gap-3">
@@ -1103,13 +1248,54 @@ function Orders() {
         <button type="button" onClick={() => setSelected(new Set())} className={btn.quiet}>
           Clear
         </button>
-        <button type="button" onClick={() => printNotes(rows.filter((o) => selected.has(o.id)))} className={btn.ghost}>
-          <i aria-hidden className="bx bx-printer text-lg" /> Print notes
-        </button>
-        <button type="button" disabled={bulkBusy} onClick={() => void dispatchSelected()} className={btn.primary}>
-          {bulkBusy ? "Working…" : `Out for delivery (${selected.size})`}
-        </button>
+        <ActionMenu
+          up
+          label="More actions for the selected orders"
+          items={
+            [
+              { label: "Print delivery notes", icon: "bx-printer", onSelect: () => printNotes(selRows) },
+              { label: "Export selected", icon: "bx-download", onSelect: () => downloadCsv(selRows) },
+              {
+                label: cancellable.length === 0 || cancellable.length === selRows.length ? "Cancel orders…" : `Cancel ${cancellable.length} of ${selRows.length}…`,
+                icon: "bx-x-circle",
+                danger: true,
+                disabled: cancellable.length === 0,
+                hint: cancellable.length === 0 ? "None of these can be cancelled" : cancellable.length < selRows.length ? "The others are already finished, or paid (admins only)" : "Paid orders are refunded",
+                onSelect: () => setBulkCancel(cancellable.slice(0, 25)),
+              },
+              { label: "Delete orders", icon: "bx-trash", disabled: true, hint: "Orders are never deleted. Cancel them instead.", onSelect: () => undefined },
+            ] satisfies MenuItem[]
+          }
+        >
+          More
+          <i aria-hidden className="bx bx-chevron-up text-lg" />
+        </ActionMenu>
+        {nDeliver > 0 && (
+          <button type="button" disabled={bulkBusy} onClick={() => void deliverSelected()} className={cn(nDispatch > 0 ? btn.ghost : btn.primary, "flex-1")}>
+            {bulkBusy ? "Working…" : `Delivered (${nDeliver})`}
+          </button>
+        )}
+        {nDispatch > 0 && (
+          <button type="button" disabled={bulkBusy} onClick={() => void dispatchSelected()} className={cn(btn.primary, "flex-1")}>
+            {bulkBusy ? "Working…" : `Out for delivery (${nDispatch})`}
+          </button>
+        )}
       </ActionBar>
+
+      {bulkCancel && (
+        <BulkCancelDialog
+          orders={bulkCancel}
+          onClose={() => setBulkCancel(null)}
+          onDone={(msg, failed) => {
+            setBulkCancel(null);
+            setSelected(new Set());
+            setSelectMode(false);
+            if (failed) toast.error(msg);
+            else toast.success(msg);
+            void load();
+          }}
+        />
+      )}
 
       <AdminSheet
         open={sheetOpen}

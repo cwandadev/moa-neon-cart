@@ -1,5 +1,6 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { AdminSheet } from "@/components/admin/AdminSheet";
 import { AlertsContext } from "@/components/admin/alertsContext";
 import type { AdminAlerts, Alert, Level } from "@/lib/adminAlerts";
 import { useNotifications } from "@/lib/notifications";
@@ -290,7 +291,7 @@ function TopBar({
   );
 }
 
-/** The phone's "More": everything that does not fit in the four tabs. */
+/** The phone's "More": everything that does not fit in the four tabs. It is the same sheet as every other popup. */
 function MoreSheet({
   open,
   onClose,
@@ -299,7 +300,6 @@ function MoreSheet({
   unread,
   name,
   role,
-  triggerRef,
 }: {
   open: boolean;
   onClose: () => void;
@@ -308,65 +308,13 @@ function MoreSheet({
   unread: number;
   name: string;
   role: string;
-  triggerRef: RefObject<HTMLButtonElement | null>;
 }) {
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    panelRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    const trigger = triggerRef.current;
-    return () => {
-      document.body.style.overflow = previous;
-      window.removeEventListener("keydown", onKey);
-      trigger?.focus();
-    };
-  }, [open, onClose, triggerRef]);
-
   const row =
     "flex min-h-14 items-center gap-4 rounded-2xl px-4 text-base text-foreground transition-colors hover:bg-white/5";
-
   return (
-    <div className={cn("fixed inset-0 z-40 md:hidden", !open && "pointer-events-none")} inert={!open}>
-      <button
-        type="button"
-        aria-label="Close menu"
-        tabIndex={-1}
-        onClick={onClose}
-        className={cn(
-          "absolute inset-0 bg-black/70 transition-opacity duration-200 motion-reduce:transition-none",
-          open ? "opacity-100" : "opacity-0",
-        )}
-      />
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label="More"
-        tabIndex={-1}
-        className={cn(
-          "absolute inset-x-0 bottom-0 max-h-[85vh] overflow-y-auto rounded-t-3xl border-t border-[#262626] bg-[#0a0a0a] px-3 pt-3 pb-[calc(1rem+env(safe-area-inset-bottom))] outline-none",
-          "transition-transform duration-300 motion-reduce:transition-none",
-          open ? "translate-y-0" : "translate-y-full",
-        )}
-      >
-        <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-white/20" aria-hidden />
-        <div className="flex items-center gap-3 px-4 pb-3">
-          <span aria-hidden className="grid size-10 place-items-center rounded-full bg-secondary text-sm font-medium">
-            {initials(name)}
-          </span>
-          <div className="min-w-0">
-            <p className="truncate text-base leading-tight">{name}</p>
-            <p className="text-sm leading-tight text-muted-foreground">{role}</p>
-          </div>
-        </div>
-        <ul className="grid gap-1 border-t border-[#262626] pt-2">
+    <div className="md:hidden">
+      <AdminSheet open={open} onClose={onClose} title="More" subtitle={`${name} · ${role}`}>
+        <ul className="-mx-2 grid gap-1">
           {items.map((item) => (
             <li key={item.to}>
               <Link to={item.to} className={cn(row, FOCUS)}>
@@ -394,7 +342,7 @@ function MoreSheet({
             </Link>
           </li>
         </ul>
-      </div>
+      </AdminSheet>
     </div>
   );
 }
@@ -407,7 +355,6 @@ function BottomTabs({
   moreActive,
   moreDot,
   onMore,
-  moreRef,
 }: {
   tabs: NavItem[];
   pathname: string;
@@ -415,7 +362,6 @@ function BottomTabs({
   moreActive: boolean;
   moreDot: boolean;
   onMore: () => void;
-  moreRef: RefObject<HTMLButtonElement | null>;
 }) {
   const tab = "relative flex min-h-16 flex-1 flex-col items-center justify-center gap-0.5 text-xs transition-colors";
   return (
@@ -443,7 +389,6 @@ function BottomTabs({
         );
       })}
       <button
-        ref={moreRef}
         type="button"
         onClick={onMore}
         aria-haspopup="dialog"
@@ -481,7 +426,6 @@ export function AdminShell({
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { unread } = useNotifications();
   const [moreOpen, setMoreOpen] = useState(false);
-  const moreRef = useRef<HTMLButtonElement>(null);
   const closeMore = useCallback(() => setMoreOpen(false), []);
 
   const items = NAV.filter((n) => !n.adminOnly || isAdmin);
@@ -499,7 +443,7 @@ export function AdminShell({
   const moreDot = unread > 0 || alerts.inventory.level !== "green";
 
   return (
-    <div className="moa-admin min-h-screen">
+    <div className="moa-admin min-h-screen [&_.grid>*]:min-w-0">
       <a
         href="#admin-main"
         className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-50 focus:rounded-xl focus:bg-white focus:px-4 focus:py-2 focus:text-sm focus:text-black"
@@ -527,7 +471,6 @@ export function AdminShell({
         moreActive={moreActive}
         moreDot={moreDot}
         onMore={() => setMoreOpen(true)}
-        moreRef={moreRef}
       />
       <MoreSheet
         open={moreOpen}
@@ -537,7 +480,6 @@ export function AdminShell({
         unread={unread}
         name={name}
         role={role}
-        triggerRef={moreRef}
       />
     </div>
   );

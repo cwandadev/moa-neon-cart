@@ -42,7 +42,7 @@ export const compact = (v: number): string =>
 /** "+12% vs the 30 days before", for a number compared with the period before it. */
 export function change(now: number, before: number, asPercent: boolean, unit: string): { text: string; tone: "up" | "down" | "flat" } | undefined {
   if (now === 0 && before === 0) return undefined;
-  if (before === 0) return { text: `New: nothing ${unit}`, tone: "up" };
+  if (before === 0) return { text: `Up from zero (vs ${unit})`, tone: "up" };
   const diff = now - before;
   if (diff === 0) return { text: `Same as ${unit}`, tone: "flat" };
   const sign = diff > 0 ? "+" : "−";
