@@ -1,10 +1,21 @@
 import type { ReactNode } from "react";
 
-export function PageHead({ title, subtitle }: { title: string; subtitle: string }) {
+export function PageHead({
+  title,
+  subtitle,
+  actions,
+}: {
+  title: string;
+  subtitle?: string | undefined;
+  actions?: ReactNode;
+}) {
   return (
-    <header className="mb-8">
-      <h1 className="font-display text-2xl font-semibold tracking-tight md:text-3xl">{title}</h1>
-      <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
+    <header className="mb-6 flex flex-wrap items-end justify-between gap-3 md:mb-8">
+      <div className="min-w-0">
+        <h1 className="font-display text-2xl font-semibold tracking-tight md:text-3xl">{title}</h1>
+        {subtitle && <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{subtitle}</p>}
+      </div>
+      {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
     </header>
   );
 }
@@ -24,7 +35,7 @@ export function Panel({
     <section className={`glass rounded-2xl p-5 ${className}`}>
       {title && (
         <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 className="font-display text-sm font-medium tracking-tight">{title}</h2>
+          <h2 className="font-display text-base font-semibold tracking-tight">{title}</h2>
           {action}
         </div>
       )}
@@ -37,23 +48,27 @@ export function Kpi({
   label,
   value,
   delta,
+  tone = "up",
   icon,
 }: {
   label: string;
   value: string;
-  delta?: string;
+  delta?: string | undefined;
+  tone?: "up" | "down" | "flat";
   icon: string;
 }) {
   return (
-    <div className="glass card-hover rounded-2xl p-5">
-      <div className="flex items-center justify-between">
-        <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">{label}</span>
-        <span className="grid size-9 place-items-center rounded-xl bg-primary/10 text-primary">
+    <div className="glass rounded-2xl p-5">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm text-muted-foreground">{label}</span>
+        <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
           <i className={`bx ${icon}`} />
         </span>
       </div>
-      <p className="mt-4 font-display text-2xl font-semibold">{value}</p>
-      {delta && <p className="mt-1 text-xs text-success">{delta}</p>}
+      <p className="mt-3 font-display text-2xl font-semibold">{value}</p>
+      {delta && (
+        <p className={`mt-1 text-sm ${tone === "down" ? "text-destructive" : tone === "flat" ? "text-muted-foreground" : "text-success"}`}>{delta}</p>
+      )}
     </div>
   );
 }
@@ -79,8 +94,37 @@ export function StatusPill({ status }: { status: string }) {
     ? status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
     : status;
   return (
-    <span className={`rounded-full px-2.5 py-1 text-[11px] ${map[status] ?? "bg-muted"}`}>
+    <span className={`whitespace-nowrap rounded-full px-2.5 py-1 text-xs ${map[status] ?? "bg-muted"}`}>
       {label}
     </span>
+  );
+}
+
+/** A grey block that stands in for content while it loads. */
+export function Skeleton({ className = "" }: { className?: string }) {
+  return <div aria-hidden className={`animate-pulse rounded-lg bg-secondary/60 motion-reduce:animate-none ${className}`} />;
+}
+
+/** An empty list is an invitation: say what is missing and, if there is one, what to do about it. */
+export function EmptyState({
+  icon,
+  title,
+  hint,
+  action,
+}: {
+  icon: string;
+  title: string;
+  hint?: string | undefined;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="grid justify-items-center gap-2 px-4 py-12 text-center">
+      <span className="grid size-12 place-items-center rounded-2xl bg-secondary text-2xl text-muted-foreground">
+        <i className={`bx ${icon}`} />
+      </span>
+      <p className="font-display text-base font-semibold">{title}</p>
+      {hint && <p className="max-w-sm text-sm text-muted-foreground">{hint}</p>}
+      {action && <div className="mt-2">{action}</div>}
+    </div>
   );
 }

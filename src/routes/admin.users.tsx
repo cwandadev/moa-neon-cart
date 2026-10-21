@@ -1,7 +1,11 @@
 import { FunctionsHttpError } from "@supabase/supabase-js";
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { PageHead, Panel } from "@/components/moa/ui";
+import { toast } from "sonner";
+import { ActionMenu, type MenuItem } from "@/components/admin/ActionMenu";
+import { AdminSheet } from "@/components/admin/AdminSheet";
+import { btn, field, FilterTabs, SearchField, type TabItem } from "@/components/admin/controls";
+import { EmptyState, PageHead, Skeleton } from "@/components/moa/ui";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -12,10 +16,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useAuth } from "@/lib/auth";
-import { supabase } from "@/lib/supabase";
 import { usePersistedState } from "@/lib/persist";
+import { supabase } from "@/lib/supabase";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/admin/users")({
   head: () => ({ meta: [{ title: "Users — MOA Mart Suite" }] }),
@@ -43,8 +47,11 @@ const ROLE_TONE: Record<Role, string> = {
   customer: "bg-secondary text-muted-foreground",
 };
 
-const fieldClass =
-  "w-full rounded-xl border border-[#262626] bg-background px-3 text-sm text-foreground outline-none focus:border-foreground/50";
+const ROLES: Array<[Role, string, string]> = [
+  ["customer", "Customer", "Shops on the storefront."],
+  ["staff", "Staff", "Orders, inventory and the inbox."],
+  ["admin", "Admin", "Everything, including users and money."],
+];
 
 async function call<T>(body: Record<string, unknown>): Promise<{ data?: T; error?: string }> {
   const { data, error } = await supabase.functions.invoke<T>("manage-users", { body });
@@ -64,24 +71,42 @@ async function call<T>(body: Record<string, unknown>): Promise<{ data?: T; error
 }
 
 const nameOf = (u: U) => `${u.first_name} ${u.last_name}`.trim() || u.email;
-const ago = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "Never");
+const day = (iso: string | null) =>
+  iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "Never";
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+/** A readable temporary password without look-alike characters. */
+function makePassword(): string {
+  const chars = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789";
+  const bytes = new Uint32Array(12);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => chars[b % chars.length]).join("");
+}
+
+function Field({ label, hint, children }: { label: string; hint?: string | undefined; children: ReactNode }) {
   return (
-    <label className="grid gap-1.5 text-xs text-muted-foreground">
-      <span>{label}</span>
+    <label className="grid gap-1.5">
+      <span className="text-sm text-muted-foreground">{label}</span>
       {children}
+      {hint && <span className="text-xs text-muted-foreground">{hint}</span>}
     </label>
   );
 }
 
-function UserDialog({
+function Pill({ className, children }: { className: string; children: ReactNode }) {
+  return <span className={cn("whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium", className)}>{children}</span>;
+}
+
+// ---------- create or edit ----------
+
+function UserSheet({
+  open,
   user,
   isMe,
   onClose,
   onDone,
 }: {
-  user?: U | undefined;
+  open: boolean;
+  user: U | undefined;
   isMe: boolean;
   onClose: () => void;
   onDone: (msg: string) => void;
@@ -97,18 +122,9 @@ function UserDialog({
 
   const submit = async () => {
     setError("");
-    if (!first.trim() || !last.trim()) {
-      setError("Enter a first and last name.");
-      return;
-    }
-    if (!user && !/^\S+@\S+\.\S+$/.test(email.trim())) {
-      setError("Enter a valid email.");
-      return;
-    }
-    if ((!user || password) && password.length < 8) {
-      setError("The password must be at least 8 characters.");
-      return;
-    }
+    if (!first.trim() || !last.trim()) return setError("Enter a first and last name.");
+    if (!user && !/^\S+@\S+\.\S+$/.test(email.trim())) return setError("Enter a valid email.");
+    if ((!user || password) && password.length < 8) return setError("The password must be at least 8 characters.");
     setBusy(true);
     const r = user
       ? await call({
@@ -122,116 +138,142 @@ function UserDialog({
         })
       : await call({ action: "create", email, first_name: first, last_name: last, phone, role, password });
     setBusy(false);
-    if (r.error) {
-      setError(r.error);
-      return;
-    }
+    if (r.error) return setError(r.error);
     onDone(user ? "Changes saved." : "Account created. Give the person their email and temporary password.");
   };
 
   return (
-    <Dialog
-      open
-      onOpenChange={(o) => {
-        if (!o) onClose();
-      }}
-    >
-      <DialogContent className="moa-admin-dialog max-h-[90vh] w-[calc(100%-1.5rem)] overflow-y-auto rounded-2xl border-[#262626] sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>{user ? "Edit user" : "Create account"}</DialogTitle>
-          <DialogDescription>
-            {user ? user.email : "The account works right away. No confirmation email is sent."}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="grid gap-4">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="First name">
-              <input value={first} onChange={(e) => setFirst(e.target.value)} className={`${fieldClass} h-10`} />
-            </Field>
-            <Field label="Last name">
-              <input value={last} onChange={(e) => setLast(e.target.value)} className={`${fieldClass} h-10`} />
-            </Field>
-          </div>
-          {!user && (
-            <Field label="Email">
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={`${fieldClass} h-10`} />
-            </Field>
+    <AdminSheet
+      open={open}
+      onClose={() => !busy && onClose()}
+      title={user ? "Edit user" : "Create account"}
+      subtitle={user ? user.email : "The account works right away. No confirmation email is sent."}
+      footer={
+        <div className="grid gap-2">
+          {error && (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
           )}
-          <Field label="Phone (optional)">
-            <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+250 78..." className={`${fieldClass} h-10`} />
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button type="button" onClick={onClose} disabled={busy} className={btn.ghost}>
+              Cancel
+            </button>
+            <button type="button" disabled={busy} onClick={() => void submit()} className={btn.primary}>
+              {busy ? "Saving…" : user ? "Save changes" : "Create account"}
+            </button>
+          </div>
+        </div>
+      }
+    >
+      <div className="grid gap-5">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="First name">
+            <input value={first} onChange={(e) => setFirst(e.target.value)} autoComplete="off" className={field} />
           </Field>
-          <Field label="Role">
-            <select
-              value={role}
-              disabled={isMe}
-              onChange={(e) => setRole(e.target.value as Role)}
-              className={`${fieldClass} h-10 disabled:opacity-60`}
+          <Field label="Last name">
+            <input value={last} onChange={(e) => setLast(e.target.value)} autoComplete="off" className={field} />
+          </Field>
+        </div>
+        {!user && (
+          <Field label="Email">
+            <input type="email" inputMode="email" autoCapitalize="none" value={email} onChange={(e) => setEmail(e.target.value)} className={field} />
+          </Field>
+        )}
+        <Field label="Phone (optional)">
+          <input type="tel" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+250 78…" className={field} />
+        </Field>
+
+        <fieldset className="grid gap-2">
+          <legend className="mb-1 text-sm text-muted-foreground">Role</legend>
+          {ROLES.map(([key, label, hint]) => (
+            <label
+              key={key}
+              className={cn(
+                "flex min-h-14 items-center gap-3 rounded-2xl border px-4 py-3 transition-colors",
+                role === key ? "border-foreground/60 bg-white/5" : "border-[#262626]",
+                isMe ? "cursor-not-allowed opacity-60" : "cursor-pointer hover:bg-white/5",
+              )}
             >
-              <option value="customer" className="bg-card">Customer</option>
-              <option value="staff" className="bg-card">Staff (orders, inventory, inbox)</option>
-              <option value="admin" className="bg-card">Admin (everything)</option>
-            </select>
-            {isMe && <span className="text-[11px]">You cannot change your own role.</span>}
-          </Field>
-          <Field label={user ? "New temporary password (leave empty to keep the current one)" : "Temporary password"}>
+              <input type="radio" name="role" className="size-5" checked={role === key} disabled={isMe} onChange={() => setRole(key)} />
+              <span>
+                <span className="block text-base">{label}</span>
+                <span className="block text-sm text-muted-foreground">{hint}</span>
+              </span>
+            </label>
+          ))}
+          {isMe && <span className="text-sm text-muted-foreground">You cannot change your own role.</span>}
+        </fieldset>
+
+        <Field
+          label={user ? "New temporary password (leave empty to keep the current one)" : "Temporary password"}
+          hint="At least 8 characters. Tell the person to change it after signing in."
+        >
+          <div className="flex gap-2">
             <input
               type="text"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="At least 8 characters"
               autoComplete="off"
-              className={`${fieldClass} h-10`}
+              autoCapitalize="none"
+              spellCheck={false}
+              className={field}
             />
-          </Field>
-        </div>
-
-        {error && <p className="text-sm text-destructive">{error}</p>}
-
-        <div className="mt-2 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <button
-            type="button"
-            onClick={onClose}
-            className="h-10 rounded-xl border border-[#262626] px-4 text-sm text-muted-foreground transition-colors hover:text-foreground"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void submit()}
-            className="h-10 rounded-xl bg-primary px-5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
-          >
-            {busy ? "Saving…" : user ? "Save changes" : "Create account"}
-          </button>
-        </div>
-      </DialogContent>
-    </Dialog>
+            <button type="button" onClick={() => setPassword(makePassword())} className={btn.ghost}>
+              Generate
+            </button>
+          </div>
+        </Field>
+      </div>
+    </AdminSheet>
   );
 }
 
 type Confirm = { kind: "disable" | "enable" | "delete"; user: U } | null;
+
+// ---------- the list ----------
+
+function menuFor(u: U, mine: boolean, h: { edit: (u: U) => void; ask: (c: NonNullable<Confirm>) => void }): MenuItem[] {
+  return [
+    { label: "Edit", icon: "bx-edit", onSelect: () => h.edit(u) },
+    {
+      label: u.disabled ? "Enable account" : "Disable account",
+      icon: u.disabled ? "bx-lock-open" : "bx-block",
+      disabled: mine,
+      hint: mine ? "You cannot disable yourself" : u.disabled ? "They can sign in again" : "They cannot sign in. Orders and history stay.",
+      onSelect: () => h.ask({ kind: u.disabled ? "enable" : "disable", user: u }),
+    },
+    {
+      label: "Delete account",
+      icon: "bx-trash",
+      danger: true,
+      disabled: mine || u.orders > 0,
+      hint: mine ? "You cannot delete yourself" : u.orders > 0 ? "Has orders: disable instead" : "Removed permanently",
+      onSelect: () => h.ask({ kind: "delete", user: u }),
+    },
+  ];
+}
 
 function Users() {
   const { isAdmin, ready } = useAuth();
   const [users, setUsers] = useState<U[]>([]);
   const [me, setMe] = useState("");
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [loadError, setLoadError] = useState("");
   const [q, setQ] = usePersistedState("moa:users:q", "");
   const [roleFilter, setRoleFilter] = usePersistedState<"all" | Role>("moa:users:role", "all");
-  const [dialog, setDialog] = useState<{ user?: U | undefined } | null>(null);
+  const [sheet, setSheet] = useState<{ user?: U | undefined } | null>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [confirm, setConfirm] = useState<Confirm>(null);
 
   const load = useCallback(async () => {
     const r = await call<{ users: U[]; me: string }>({ action: "list" });
     if (r.error || !r.data) {
-      setError(r.error ?? "Could not load users.");
+      setLoadError(r.error ?? "Could not load users.");
     } else {
       setUsers(r.data.users);
       setMe(r.data.me);
-      setError("");
+      setLoadError("");
     }
     setLoading(false);
   }, []);
@@ -255,176 +297,207 @@ function Users() {
     if (!confirm) return;
     const { kind, user } = confirm;
     setConfirm(null);
-    setError("");
     const r = await call({ action: kind, id: user.id });
     if (r.error) {
-      setError(r.error);
+      toast.error(r.error);
       return;
     }
-    setNotice(kind === "delete" ? "Account deleted." : kind === "disable" ? "Account disabled." : "Account enabled.");
+    toast.success(kind === "delete" ? "Account deleted." : kind === "disable" ? "Account disabled." : "Account enabled.");
     void load();
   };
+
+  const openSheet = (u?: U) => {
+    setSheet({ user: u });
+    setSheetOpen(true);
+  };
+
+  const handlers = { edit: (u: U) => openSheet(u), ask: (c: NonNullable<Confirm>) => setConfirm(c) };
 
   if (ready && !isAdmin) {
     return (
       <>
         <PageHead title="Users" subtitle="Manage accounts and roles." />
-        <Panel>
-          <p className="py-8 text-center text-sm text-muted-foreground">Only admins can manage users.</p>
-        </Panel>
+        <div className="rounded-2xl border border-[#262626] bg-card">
+          <EmptyState icon="bx-lock-alt" title="Only admins can manage users" hint="Ask an admin if someone needs an account or a different role." />
+        </div>
       </>
     );
   }
 
-  const act = "text-[11px] text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-40 disabled:no-underline";
+  const tabs: TabItem<"all" | Role>[] = [
+    { key: "all", label: "All", count: users.length },
+    { key: "admin", label: "Admins", count: count("admin") },
+    { key: "staff", label: "Staff", count: count("staff"), tone: "info" },
+    { key: "customer", label: "Customers", count: count("customer") },
+  ];
 
   return (
     <>
       <PageHead
         title="Users"
         subtitle="Create accounts, change roles, and disable or delete people. Guest visitors are not listed."
+        actions={
+          <button type="button" onClick={() => openSheet()} className={btn.primary}>
+            <i aria-hidden className="bx bx-plus text-lg" /> Create account
+          </button>
+        }
       />
 
-      <div className="mb-4 flex flex-wrap gap-2">
-        {(
-          [
-            ["all", "All", users.length, "border-border text-muted-foreground"],
-            ["admin", "Admins", count("admin"), "border-destructive/40 text-destructive"],
-            ["staff", "Staff", count("staff"), "border-info/40 text-info"],
-            ["customer", "Customers", count("customer"), "border-border text-muted-foreground"],
-          ] as Array<["all" | Role, string, number, string]>
-        ).map(([key, label, n, tone]) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setRoleFilter(key)}
-            className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${tone} ${roleFilter === key ? "bg-secondary/70 ring-1 ring-current" : "hover:bg-secondary/30"}`}
-          >
-            {label} <span className="ml-1 font-semibold">{n}</span>
-          </button>
-        ))}
+      <div className="grid gap-3">
+        <SearchField value={q} onChange={setQ} label="Search users" placeholder="Search name, email or phone" />
+        <FilterTabs items={tabs} value={roleFilter} onChange={setRoleFilter} label="Role" />
       </div>
 
-      <div className="mb-5 flex flex-wrap gap-3">
-        <div className="relative min-w-56 flex-1">
-          <i className="bx bx-search pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search name, email or phone"
-            className="hairline h-10 w-full rounded-xl bg-card/60 pl-9 pr-3 text-sm outline-none focus:neon-ring"
-          />
-        </div>
-        <button
-          type="button"
-          onClick={() => {
-            setNotice("");
-            setDialog({});
-          }}
-          className="flex h-10 items-center gap-2 rounded-xl bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
-        >
-          <i className="bx bx-plus text-lg" /> Create account
-        </button>
-      </div>
-
-      {notice && <p className="mb-4 text-sm text-success">{notice}</p>}
-      {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
-
-      <Panel className="overflow-x-auto p-0">
-        <table className="w-full min-w-[900px] text-left text-sm">
-          <thead className="border-b border-[#262626] text-[11px] uppercase tracking-wider text-muted-foreground">
-            <tr>
-              <th className="p-4">Person</th>
-              <th className="p-4">Role</th>
-              <th className="p-4">Signs in with</th>
-              <th className="p-4">Last login</th>
-              <th className="p-4">Orders</th>
-              <th className="p-4">Status</th>
-              <th className="p-4">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {shown.map((u) => {
-              const mine = u.id === me;
-              return (
-                <tr
-                  key={u.id}
-                  className={`border-b border-[#262626]/60 align-top hover:bg-secondary/30 ${
-                    u.disabled ? "border-l-4 border-l-destructive" : "border-l-4 border-l-success"
-                  }`}
-                >
-                  <td className="p-4">
-                    <p className="text-xs">
-                      {nameOf(u)} {mine && <span className="ml-1 text-[10px] text-muted-foreground">(you)</span>}
-                    </p>
-                    <p className="text-[11px] text-muted-foreground">{u.email}</p>
-                    {u.phone && <p className="text-[11px] text-muted-foreground">{u.phone}</p>}
-                  </td>
-                  <td className="p-4">
-                    <span className={`rounded-full px-2.5 py-1 text-[11px] capitalize ${ROLE_TONE[u.role]}`}>{u.role}</span>
-                  </td>
-                  <td className="p-4 text-xs capitalize text-muted-foreground">{u.provider}</td>
-                  <td className="p-4 text-xs text-muted-foreground">{ago(u.last_sign_in_at)}</td>
-                  <td className="p-4 text-xs">{u.orders}</td>
-                  <td className="p-4">
-                    <span
-                      className={`rounded-full px-2.5 py-1 text-[11px] ${u.disabled ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"}`}
-                    >
-                      {u.disabled ? "Disabled" : "Active"}
-                    </span>
-                  </td>
-                  <td className="p-4">
-                    <div className="flex flex-wrap gap-x-3 gap-y-1">
-                      <button
-                        type="button"
-                        className={act}
-                        onClick={() => {
-                          setNotice("");
-                          setDialog({ user: u });
-                        }}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        className={act}
-                        disabled={mine}
-                        title={mine ? "You cannot disable yourself" : ""}
-                        onClick={() => setConfirm({ kind: u.disabled ? "enable" : "disable", user: u })}
-                      >
-                        {u.disabled ? "Enable" : "Disable"}
-                      </button>
-                      <button
-                        type="button"
-                        className={`${act} !text-destructive`}
-                        disabled={mine || u.orders > 0}
-                        title={mine ? "You cannot delete yourself" : u.orders > 0 ? "Has orders: disable instead" : ""}
-                        onClick={() => setConfirm({ kind: "delete", user: u })}
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        {!loading && shown.length === 0 && (
-          <p className="p-8 text-center text-sm text-muted-foreground">No users match.</p>
+      <div className="mt-4">
+        {loadError && (
+          <div className="rounded-2xl border border-destructive/40 bg-destructive/10 p-5 text-sm">
+            <p className="text-destructive">{loadError}</p>
+            <button type="button" onClick={() => void load()} className={cn(btn.ghost, "mt-3")}>
+              Try again
+            </button>
+          </div>
         )}
-        {loading && <p className="p-8 text-center text-sm text-muted-foreground">Loading…</p>}
-      </Panel>
 
-      {dialog && (
-        <UserDialog
-          key={dialog.user?.id ?? "new"}
-          user={dialog.user}
-          isMe={dialog.user?.id === me}
-          onClose={() => setDialog(null)}
+        {loading && !loadError && (
+          <ul className="grid gap-3 md:grid-cols-2 lg:grid-cols-1" aria-label="Loading users">
+            {[0, 1, 2, 3].map((i) => (
+              <li key={i} className="rounded-2xl border border-[#262626] bg-card p-4">
+                <Skeleton className="h-5 w-40" />
+                <Skeleton className="mt-3 h-4 w-56" />
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {!loading && !loadError && shown.length === 0 && (
+          <div className="rounded-2xl border border-[#262626] bg-card">
+            <EmptyState
+              icon="bx-user-x"
+              title="No users match"
+              hint="Try a different name, or show everyone."
+              action={
+                <button
+                  type="button"
+                  className={btn.ghost}
+                  onClick={() => {
+                    setQ("");
+                    setRoleFilter("all");
+                  }}
+                >
+                  Clear search and filter
+                </button>
+              }
+            />
+          </div>
+        )}
+
+        {shown.length > 0 && (
+          <>
+            <ul className="grid gap-3 md:grid-cols-2 lg:hidden" aria-label="Users">
+              {shown.map((u) => {
+                const mine = u.id === me;
+                return (
+                  <li key={u.id} className="rounded-2xl border border-[#262626] bg-card p-4">
+                    <div className="flex items-start gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-base">
+                          {nameOf(u)} {mine && <span className="text-sm text-muted-foreground">(you)</span>}
+                        </p>
+                        <p className="truncate text-sm text-muted-foreground">{u.email}</p>
+                        {u.phone && <p className="text-sm text-muted-foreground">{u.phone}</p>}
+                      </div>
+                      <ActionMenu label={`Actions for ${nameOf(u)}`} items={menuFor(u, mine, handlers)} />
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <Pill className={cn("capitalize", ROLE_TONE[u.role])}>{u.role}</Pill>
+                      <Pill className={u.disabled ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"}>
+                        {u.disabled ? "Disabled" : "Active"}
+                      </Pill>
+                    </div>
+                    <p className="mt-3 text-sm text-muted-foreground">
+                      <span className="capitalize">{u.provider}</span> sign-in · last login {day(u.last_sign_in_at)} · {u.orders} order{u.orders === 1 ? "" : "s"}
+                    </p>
+                    <button type="button" onClick={() => openSheet(u)} className={cn(btn.ghost, "mt-3 w-full")}>
+                      Edit
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+
+            <div className="hidden overflow-hidden rounded-2xl border border-[#262626] bg-card lg:block">
+              <table className="w-full table-fixed text-left text-sm">
+                <colgroup>
+                  <col />
+                  <col className="w-28" />
+                  <col className="w-32" />
+                  <col className="w-36" />
+                  <col className="w-20" />
+                  <col className="w-28" />
+                  <col className="w-16" />
+                </colgroup>
+                <thead className="border-b border-[#262626] text-xs font-medium text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-3 font-medium">Person</th>
+                    <th className="px-3 py-3 font-medium">Role</th>
+                    <th className="px-3 py-3 font-medium">Signs in with</th>
+                    <th className="px-3 py-3 font-medium">Last login</th>
+                    <th className="px-3 py-3 font-medium">Orders</th>
+                    <th className="px-3 py-3 font-medium">Status</th>
+                    <th className="px-3 py-3">
+                      <span className="sr-only">Actions</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shown.map((u) => {
+                    const mine = u.id === me;
+                    return (
+                      <tr key={u.id} className="border-b border-[#262626]/70 align-middle last:border-0 hover:bg-white/[0.03]">
+                        <td className="px-4 py-3">
+                          <p className="truncate">
+                            {nameOf(u)} {mine && <span className="text-xs text-muted-foreground">(you)</span>}
+                          </p>
+                          <p className="truncate text-xs text-muted-foreground">{u.email}</p>
+                          {u.phone && <p className="text-xs text-muted-foreground">{u.phone}</p>}
+                        </td>
+                        <td className="px-3 py-3">
+                          <Pill className={cn("capitalize", ROLE_TONE[u.role])}>{u.role}</Pill>
+                        </td>
+                        <td className="px-3 py-3 capitalize text-muted-foreground">{u.provider}</td>
+                        <td className="px-3 py-3 text-muted-foreground">{day(u.last_sign_in_at)}</td>
+                        <td className="px-3 py-3">{u.orders}</td>
+                        <td className="px-3 py-3">
+                          <Pill className={u.disabled ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"}>
+                            {u.disabled ? "Disabled" : "Active"}
+                          </Pill>
+                        </td>
+                        <td className="px-2 py-1 text-right">
+                          <ActionMenu label={`Actions for ${nameOf(u)}`} items={menuFor(u, mine, handlers)} />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-4 text-center text-sm text-muted-foreground">
+              {shown.length} of {users.length} people
+            </p>
+          </>
+        )}
+      </div>
+
+      {sheet && (
+        <UserSheet
+          key={sheet.user?.id ?? "new"}
+          open={sheetOpen}
+          user={sheet.user}
+          isMe={sheet.user?.id === me}
+          onClose={() => setSheetOpen(false)}
           onDone={(msg) => {
-            setDialog(null);
-            setNotice(msg);
+            setSheetOpen(false);
+            toast.success(msg);
             void load();
           }}
         />
@@ -439,11 +512,7 @@ function Users() {
         <AlertDialogContent className="moa-admin-dialog rounded-2xl border-[#262626]">
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {confirm?.kind === "delete"
-                ? "Delete this account?"
-                : confirm?.kind === "disable"
-                  ? "Disable this account?"
-                  : "Enable this account?"}
+              {confirm?.kind === "delete" ? "Delete this account?" : confirm?.kind === "disable" ? "Disable this account?" : "Enable this account?"}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {confirm
@@ -456,8 +525,8 @@ function Users() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void runConfirm()}>
+            <AlertDialogCancel className="h-11">Cancel</AlertDialogCancel>
+            <AlertDialogAction className={cn("h-11", confirm?.kind === "delete" && "bg-destructive text-white hover:bg-destructive/90")} onClick={() => void runConfirm()}>
               {confirm?.kind === "delete" ? "Delete" : confirm?.kind === "disable" ? "Disable" : "Enable"}
             </AlertDialogAction>
           </AlertDialogFooter>

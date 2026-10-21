@@ -1,10 +1,15 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Kpi, PageHead, Panel } from "@/components/moa/ui";
+import { toast } from "sonner";
+import { BarList } from "@/components/admin/charts";
+import { btn, FilterTabs, type TabItem } from "@/components/admin/controls";
+import { EmptyState, Kpi, PageHead, Panel, Skeleton } from "@/components/moa/ui";
+import { ago, csvSafe, downloadText, toCsv } from "@/lib/adminTools";
 import { useAuth } from "@/lib/auth";
+import { usePersistedState } from "@/lib/persist";
 import { money } from "@/lib/products";
 import { supabase } from "@/lib/supabase";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/admin/finance")({
   head: () => ({
@@ -33,17 +38,17 @@ type PaidOrder = {
   order_items: Line[];
 };
 type Unpaid = { id: string; code: string; customer_name: string; total: number; created_at: string };
+type Period = "7" | "30" | "90" | "all";
+const DAY = 24 * 60 * 60 * 1000;
 
 const unitCost = (l: Line) => {
   const c = Array.isArray(l.order_item_costs) ? l.order_item_costs[0] : l.order_item_costs;
   return c?.cost ?? 0;
 };
-
-const compact = (v: number) =>
-  v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : v >= 1000 ? `${Math.round(v / 1000)}k` : String(v);
-
-const methodLabel = (m: string | null) =>
-  m === "MTN_MOMO_RWA" ? "MTN MoMo" : m === "AIRTEL_RWA" ? "Airtel Money" : "—";
+const methodLabel = (m: string | null) => (m === "MTN_MOMO_RWA" ? "MTN MoMo" : m === "AIRTEL_RWA" ? "Airtel Money" : "—");
+const paidWhen = (o: PaidOrder) => o.paid_at ?? o.created_at;
+const dateOf = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+const pct = (n: number, of: number) => (of > 0 ? `${Math.round((n / of) * 100)}%` : "—");
 
 function Finance() {
   const { isAdmin, ready } = useAuth();
@@ -51,15 +56,14 @@ function Finance() {
   const [unpaid, setUnpaid] = useState<Unpaid[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [period, setPeriod] = usePersistedState<Period>("moa:finance:period", "30");
 
   const load = useCallback(async () => {
     try {
       const [p, u] = await Promise.all([
         supabase
           .from("orders")
-          .select(
-            "id, code, customer_name, total, paid_at, created_at, payment_method, order_items(price, qty, order_item_costs(cost), products(category:categories(name)))",
-          )
+          .select("id, code, customer_name, total, paid_at, created_at, payment_method, order_items(price, qty, order_item_costs(cost), products(category:categories(name)))")
           .eq("payment_status", "paid")
           .order("created_at", { ascending: false })
           .limit(1000),
@@ -77,7 +81,7 @@ function Finance() {
       setUnpaid((u.data ?? []) as unknown as Unpaid[]);
       setError("");
     } catch {
-      setError("Could not load finance data. Check your connection and refresh.");
+      setError("Could not load finance data. Check your connection and try again.");
     } finally {
       setLoading(false);
     }
@@ -97,106 +101,133 @@ function Finance() {
     };
   }, [isAdmin, load]);
 
-  const { revenue, cogs } = useMemo(() => {
+  const inPeriod = useMemo(() => {
+    if (period === "all") return paid;
+    const edge = Date.now() - Number(period) * DAY;
+    return paid.filter((o) => new Date(paidWhen(o)).getTime() >= edge);
+  }, [paid, period]);
+
+  const { revenue, cogs, categories } = useMemo(() => {
     let r = 0;
     let c = 0;
-    for (const o of paid)
+    const cat = new Map<string, { revenue: number; cost: number }>();
+    for (const o of inPeriod)
       for (const l of o.order_items) {
-        r += l.price * l.qty;
-        c += unitCost(l) * l.qty;
-      }
-    return { revenue: r, cogs: c };
-  }, [paid]);
-
-  const byCategory = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const o of paid)
-      for (const l of o.order_items) {
+        const rev = l.price * l.qty;
+        const cost = unitCost(l) * l.qty;
+        r += rev;
+        c += cost;
         const name = l.products?.category?.name ?? "Other";
-        map.set(name, (map.get(name) ?? 0) + l.price * l.qty);
+        const cur = cat.get(name) ?? { revenue: 0, cost: 0 };
+        cur.revenue += rev;
+        cur.cost += cost;
+        cat.set(name, cur);
       }
-    return [...map].map(([label, value]) => ({ label: label.split(" ")[0] ?? label, value }));
-  }, [paid]);
+    return {
+      revenue: r,
+      cogs: c,
+      categories: [...cat].map(([label, v]) => ({ label, value: v.revenue, note: `Margin ${pct(v.revenue - v.cost, v.revenue)}` })).sort((a, b) => b.value - a.value),
+    };
+  }, [inPeriod]);
 
   const unpaidTotal = unpaid.reduce((n, o) => n + o.total, 0);
-  const margin = revenue > 0 ? `${Math.round(((revenue - cogs) / revenue) * 100)}%` : "—";
+
+  const exportCsv = () => {
+    const rows: Array<Array<string | number | null | undefined>> = [
+      ["Order", "Customer", "Method", "Amount (RWF)", "Paid"],
+      ...inPeriod.map((o) => [o.code, csvSafe(o.customer_name), methodLabel(o.payment_method), o.total, new Date(paidWhen(o)).toLocaleString()]),
+    ];
+    downloadText(`moa-payments-${new Date().toISOString().slice(0, 10)}.csv`, toCsv(rows));
+    toast.success(`${inPeriod.length} payment${inPeriod.length === 1 ? "" : "s"} exported.`);
+  };
 
   if (ready && !isAdmin) {
     return (
       <>
         <PageHead title="Financial Overview" subtitle="Revenue, costs and margins." />
-        <Panel>
-          <p className="py-8 text-center text-sm text-muted-foreground">
-            Finance is only available to admins, because it shows product costs.
-          </p>
-        </Panel>
+        <div className="rounded-2xl border border-[#262626] bg-card">
+          <EmptyState icon="bx-lock-alt" title="Finance is only for admins" hint="It shows product costs and margins." />
+        </div>
       </>
     );
   }
 
+  const tabs: TabItem<Period>[] = [
+    { key: "7", label: "7 days" },
+    { key: "30", label: "30 days" },
+    { key: "90", label: "90 days" },
+    { key: "all", label: "All time" },
+  ];
+
   return (
     <>
-      <PageHead title="Financial Overview" subtitle="Revenue, cost of goods and margin from paid orders." />
+      <PageHead
+        title="Financial Overview"
+        subtitle="Revenue, cost of goods and margin from paid orders."
+        actions={
+          <button type="button" onClick={exportCsv} disabled={inPeriod.length === 0} className={btn.ghost}>
+            <i aria-hidden className="bx bx-download text-lg" /> Export payments
+          </button>
+        }
+      />
 
-      {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
+      <FilterTabs items={tabs} value={period} onChange={setPeriod} label="Period" />
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Kpi label="Gross Revenue" value={money(revenue)} icon="bx-trending-up" />
-        <Kpi label="Cost of Goods" value={money(cogs)} icon="bx-package" />
-        <Kpi label="Gross Margin" value={margin} icon="bx-pie-chart-alt-2" />
-        <Kpi label="Awaiting Payment" value={`${unpaid.length} · ${money(unpaidTotal)}`} icon="bx-time-five" />
+      {error && (
+        <div className="mt-4 rounded-2xl border border-destructive/40 bg-destructive/10 p-4 text-sm">
+          <p className="text-destructive">{error}</p>
+          <button type="button" onClick={() => void load()} className={cn(btn.ghost, "mt-3")}>
+            Try again
+          </button>
+        </div>
+      )}
+
+      <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {loading && paid.length === 0 ? (
+          [0, 1, 2, 3].map((i) => (
+            <div key={i} className="rounded-2xl border border-[#262626] bg-card p-5">
+              <Skeleton className="h-4 w-24" />
+              <Skeleton className="mt-4 h-8 w-28" />
+            </div>
+          ))
+        ) : (
+          <>
+            <Kpi label="Gross revenue" value={money(revenue)} icon="bx-trending-up" />
+            <Kpi label="Cost of goods" value={money(cogs)} icon="bx-package" />
+            <Kpi label="Gross margin" value={pct(revenue - cogs, revenue)} icon="bx-pie-chart-alt-2" />
+            <Kpi label="Awaiting payment" value={`${unpaid.length} · ${money(unpaidTotal)}`} icon="bx-time-five" />
+          </>
+        )}
       </div>
 
-      <div className="mt-6 grid gap-4 xl:grid-cols-3">
-        <Panel title="Revenue by category" className="xl:col-span-2">
-          {byCategory.length === 0 ? (
-            <p className="py-16 text-center text-sm text-muted-foreground">
-              {loading ? "Loading…" : "No paid orders yet. Revenue appears here once customers pay."}
-            </p>
-          ) : (
-            <div className="h-72">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={byCategory}>
-                  <CartesianGrid stroke="#262626" vertical={false} />
-                  <XAxis dataKey="label" stroke="#6b7280" fontSize={11} tickLine={false} axisLine={false} />
-                  <YAxis
-                    stroke="#6b7280"
-                    fontSize={11}
-                    tickLine={false}
-                    axisLine={false}
-                    tickFormatter={(v: number) => compact(v)}
-                  />
-                  <Tooltip
-                    cursor={{ fill: "#ffffff08" }}
-                    formatter={(v) => money(Number(v))}
-                    contentStyle={{ background: "#0a0a0a", border: "1px solid #262626", borderRadius: 12, fontSize: 12 }}
-                  />
-                  <Bar dataKey="value" fill="#ffffff" radius={[8, 8, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </Panel>
+      <div className="mt-6 grid gap-6 xl:grid-cols-3">
+        <div className="xl:col-span-2">
+          <Panel title="Revenue by category">
+            {categories.length === 0 ? (
+              <EmptyState icon="bx-pie-chart-alt" title={loading ? "Loading…" : "No paid orders in this period"} hint={loading ? undefined : "Revenue appears here once customers pay."} />
+            ) : (
+              <BarList label="Revenue by category" rows={categories} format={money} />
+            )}
+          </Panel>
+        </div>
 
         <Panel title="Awaiting payment">
           {unpaid.length === 0 ? (
-            <p className="py-8 text-center text-xs text-muted-foreground">
-              {loading ? "Loading…" : "Nothing is waiting for payment."}
-            </p>
+            <EmptyState icon="bx-check-circle" title={loading ? "Loading…" : "Nothing is waiting for payment"} />
           ) : (
-            <ul className="flex max-h-72 flex-col gap-3 overflow-y-auto">
+            <ul className="max-h-96 divide-y divide-[#262626] overflow-y-auto" aria-label="Awaiting payment">
               {unpaid.slice(0, 12).map((o) => (
-                <li key={o.id} className="flex items-center gap-3 text-xs">
-                  <span className="grid size-9 place-items-center rounded-lg bg-warning/10 text-warning">
-                    <i className="bx bx-time-five" />
+                <li key={o.id} className="flex items-center gap-3 py-3">
+                  <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-warning/10 text-warning">
+                    <i aria-hidden className="bx bx-time-five text-lg" />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate">{o.customer_name}</p>
-                    <p className="text-[11px] text-muted-foreground">
-                      {o.code} · {new Date(o.created_at).toLocaleDateString()}
+                    <p className="truncate text-sm">{o.customer_name}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {o.code} · {ago(o.created_at)} ago
                     </p>
                   </div>
-                  <span className="text-primary">{money(o.total)}</span>
+                  <span className="shrink-0 text-sm font-medium">{money(o.total)}</span>
                 </li>
               ))}
             </ul>
@@ -205,36 +236,50 @@ function Finance() {
       </div>
 
       <div className="mt-6">
-        <Panel title="Recent payments" className="overflow-x-auto">
-          {paid.length === 0 ? (
-            <p className="py-8 text-center text-xs text-muted-foreground">
-              {loading ? "Loading…" : "No payments received yet."}
-            </p>
+        <Panel title="Recent payments">
+          {inPeriod.length === 0 ? (
+            <EmptyState icon="bx-wallet" title={loading ? "Loading…" : "No payments in this period"} />
           ) : (
-            <table className="w-full min-w-[520px] text-left text-xs">
-              <thead className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                <tr>
-                  <th className="pb-3">Order</th>
-                  <th className="pb-3">Customer</th>
-                  <th className="pb-3">Method</th>
-                  <th className="pb-3">Amount</th>
-                  <th className="pb-3">Paid</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paid.slice(0, 20).map((o) => (
-                  <tr key={o.id} className="border-t border-[#262626]/60">
-                    <td className="py-3 text-muted-foreground">{o.code}</td>
-                    <td className="py-3">{o.customer_name}</td>
-                    <td className="py-3 text-muted-foreground">{methodLabel(o.payment_method)}</td>
-                    <td className="py-3 text-primary">{money(o.total)}</td>
-                    <td className="py-3 text-muted-foreground">
-                      {new Date(o.paid_at ?? o.created_at).toLocaleDateString()}
-                    </td>
-                  </tr>
+            <>
+              <ul className="divide-y divide-[#262626] lg:hidden" aria-label="Recent payments">
+                {inPeriod.slice(0, 20).map((o) => (
+                  <li key={o.id} className="flex items-center gap-3 py-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm">
+                        <span className="font-medium text-primary">{o.code}</span> · {o.customer_name}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {methodLabel(o.payment_method)} · {dateOf(paidWhen(o))}
+                      </p>
+                    </div>
+                    <span className="shrink-0 text-sm font-medium">{money(o.total)}</span>
+                  </li>
                 ))}
-              </tbody>
-            </table>
+              </ul>
+              <table className="hidden w-full table-fixed text-left text-sm lg:table">
+                <thead className="border-b border-[#262626] text-xs font-medium text-muted-foreground">
+                  <tr>
+                    <th className="w-40 py-3 font-medium">Order</th>
+                    <th className="py-3 font-medium">Customer</th>
+                    <th className="w-40 py-3 font-medium">Method</th>
+                    <th className="w-40 py-3 font-medium">Amount</th>
+                    <th className="w-40 py-3 font-medium">Paid</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {inPeriod.slice(0, 20).map((o) => (
+                    <tr key={o.id} className="border-b border-[#262626]/70 last:border-0">
+                      <td className="py-3 font-medium text-primary">{o.code}</td>
+                      <td className="truncate py-3">{o.customer_name}</td>
+                      <td className="py-3 text-muted-foreground">{methodLabel(o.payment_method)}</td>
+                      <td className="py-3 font-medium">{money(o.total)}</td>
+                      <td className="py-3 text-muted-foreground">{dateOf(paidWhen(o))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {inPeriod.length > 20 && <p className="mt-3 text-sm text-muted-foreground">Showing the latest 20 of {inPeriod.length}. Export the payments to see all of them.</p>}
+            </>
           )}
         </Panel>
       </div>
