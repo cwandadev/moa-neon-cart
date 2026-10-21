@@ -41,6 +41,7 @@ export function CartDrawer() {
       <Sheet open={cartOpen} onOpenChange={setCartOpen}>
         <SheetContent
           side={isMobile ? "bottom" : "right"}
+          snap={view === "checkout" ? "full" : "auto"}
           className={cn(
             "flex flex-col gap-0 border-border bg-card p-0",
             isMobile ? "max-h-[88dvh] rounded-t-3xl" : "w-full sm:max-w-md",

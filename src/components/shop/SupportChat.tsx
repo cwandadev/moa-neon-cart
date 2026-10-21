@@ -8,7 +8,7 @@ import { bumpChatUnread, setChatUnread, useChatUnread } from "@/lib/chatUnread";
 import { useStore } from "@/lib/store";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
-import { useSwipeDown } from "@/lib/swipe";
+import { useSheetGestures } from "@/lib/sheetGestures";
 import { useAppFrame, useIsMobile } from "@/lib/appFrame";
 import { usePersistedState } from "@/lib/persist";
 
@@ -117,10 +117,18 @@ export function SupportChat() {
 
   const frame = useAppFrame(open && isMobile && !hidden, { coverNav: true });
   const panelRef = useRef<HTMLDivElement | null>(null);
-  const swipe = useSwipeDown(
-    () => setOpen(false),
-    () => panelRef.current,
-  );
+  // On a phone: drag the title bar, or swipe down anywhere on the chat (when the messages are at the top), and it follows the finger and closes.
+  useSheetGestures({
+    enabled: isMobile && open && !hidden,
+    open,
+    fullOnly: true,
+    expanded: false,
+    setExpanded: () => undefined,
+    canExpand: () => false,
+    onClose: () => setOpen(false),
+    panelRef,
+    getOverlay: () => null,
+  });
 
   const openRef = useRef(open);
   const hiddenRef = useRef(hidden);
@@ -368,7 +376,7 @@ export function SupportChat() {
         >
           <span className="pointer-events-none absolute left-1/2 top-1.5 h-1 w-10 -translate-x-1/2 rounded-full bg-muted-foreground/40 md:hidden" />
           <div
-            {...swipe}
+            data-sheet-handle
             className="flex shrink-0 touch-none items-center gap-3 border-b border-border px-4 pb-3 pt-4 md:py-3"
           >
             {agentName ? (
