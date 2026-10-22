@@ -109,7 +109,7 @@ function DetailBlock({ title, children }: { title: string; children: ReactNode }
 }
 
 function ProductView({ product }: { product: Product }) {
-  const { addToCart, toggleWishlist, isWished, setCartOpen, setChatOpen } = useStore();
+  const { addToCartChecked, toggleWishlist, isWished, setCartOpen, setChatOpen } = useStore();
   const variants = product.variants ?? [];
   const name1 = product.optionNames?.[0] ?? "";
   const name2 = product.optionNames?.[1] ?? "";
@@ -214,10 +214,11 @@ function ProductView({ product }: { product: Product }) {
 
   const lineProduct = () => lineProductFor(product, selected);
 
-  const add = () => {
+  const add = async () => {
     if (!complete) return needChoice();
     if (soldOut) return;
-    addToCart(lineProduct(), qty);
+    const r = await addToCartChecked(lineProduct(), qty);
+    if (!r.ok) return;
     setAdded(true);
     window.setTimeout(() => setAdded(false), 1400);
     toast.success("Added to cart", {
@@ -457,7 +458,7 @@ function ProductView({ product }: { product: Product }) {
                   size="lg"
                   className="h-11 flex-1 rounded-xl text-base md:h-12"
                   disabled={soldOut && complete}
-                  onClick={add}
+                  onClick={() => void add()}
                 >
                   {soldOut && complete ? (
                     "Sold out"
