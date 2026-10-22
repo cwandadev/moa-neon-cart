@@ -634,9 +634,9 @@ function Inbox() {
   ];
 
   const tabs: TabItem<Tab>[] = [
+    { key: "all", label: "All", count: counts.all },
     { key: "needs", label: "Needs reply", count: counts.needs, tone: "warning" },
     { key: "mine", label: "Mine", count: counts.mine },
-    { key: "all", label: "All", count: counts.all },
     { key: "closed", label: "Closed" },
   ];
 

@@ -1,8 +1,9 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { AdminSheet } from "@/components/admin/AdminSheet";
+import { RangeCalendar, type DraftRange } from "@/components/admin/RangeCalendar";
 import { change, compact } from "@/components/admin/charts";
-import { btn, field, FilterTabs, type TabItem } from "@/components/admin/controls";
+import { btn, FilterTabs, type TabItem } from "@/components/admin/controls";
 import { AnimatedNumber, ChartCard, ChartSkeleton, Columns, Donut, ErrorBlock, FactList, Funnel, HeatStrip, LineKey, RankBars, Refreshing, Stat, Trend, topWithOther } from "@/components/admin/viz";
 import { EmptyState, PageHead } from "@/components/moa/ui";
 import {
@@ -84,31 +85,31 @@ function TabSkeleton() {
 
 function CustomRangeSheet({ open, onClose, initial, onApply }: { open: boolean; onClose: () => void; initial: Range; onApply: (r: Range) => void }) {
   const today = todayKigali();
-  const [from, setFrom] = useState(initial.from);
-  const [to, setTo] = useState(initial.to);
-  const [error, setError] = useState("");
-  const apply = () => {
-    const problem = validateRange(from, to, today);
-    if (problem) return setError(problem);
-    onApply({ from, to });
-  };
-  const pick = (r: Range) => {
-    setFrom(r.from);
-    setTo(r.to);
-    setError("");
-  };
+  const [draft, setDraft] = useState<DraftRange>({ from: initial.from, to: initial.to });
+  const done = draft.from !== null && draft.to !== null;
+  const waitingForEnd = draft.from !== null && draft.to === null;
+  const problem = done ? validateRange(draft.from!, draft.to!, today) : null;
+  const days = done ? daysIn({ from: draft.from!, to: draft.to! }) : 0;
+  const shortcut = (r: Range) => setDraft({ from: r.from, to: r.to });
+  const box = (label: string, value: string | null, active: boolean) => (
+    <div className={cn("rounded-2xl border p-3 transition-colors", active ? "border-white/60 bg-white/[0.06]" : "border-[#262626]")}>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className={cn("mt-0.5 text-base", value ? "font-medium" : "text-muted-foreground")}>{value ? rangeText({ from: value, to: value }) : "Pick a day"}</p>
+    </div>
+  );
   return (
     <AdminSheet
       open={open}
       onClose={onClose}
       title="Custom range"
-      subtitle="Days are counted in Kigali time."
+      subtitle="Tap the first day, then the last day. Days are counted in Kigali time."
+      fullOnPhone
       footer={
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button type="button" className={btn.ghost} onClick={onClose}>
             Cancel
           </button>
-          <button type="button" className={btn.primary} onClick={apply}>
+          <button type="button" className={btn.primary} disabled={!done || problem !== null} onClick={() => done && onApply({ from: draft.from!, to: draft.to! })}>
             Show this range
           </button>
         </div>
@@ -116,27 +117,33 @@ function CustomRangeSheet({ open, onClose, initial, onApply }: { open: boolean; 
     >
       <div className="grid gap-5">
         <div className="flex flex-wrap gap-2" role="group" aria-label="Shortcuts">
-          {[
-            ["This month", thisMonth(today)],
-            ["Last month", lastMonth(today)],
-            ["Year to date", yearToDate(today)],
-          ].map(([label, r]) => (
-            <button key={String(label)} type="button" className="min-h-11 rounded-full border border-[#262626] px-4 text-sm text-muted-foreground transition-colors hover:text-foreground" onClick={() => pick(r as Range)}>
-              {String(label)}
+          {([["This month", thisMonth(today)], ["Last month", lastMonth(today)], ["Year to date", yearToDate(today)]] as [string, Range][]).map(([label, r]) => (
+            <button key={label} type="button" className="min-h-11 whitespace-nowrap rounded-full border border-[#262626] px-3 text-[13px] text-muted-foreground transition-colors hover:border-white/40 hover:text-foreground sm:px-4 sm:text-sm" onClick={() => shortcut(r)}>
+              {label}
             </button>
           ))}
         </div>
-        <label className="grid gap-1.5">
-          <span className="text-sm text-muted-foreground">From</span>
-          <input type="date" value={from} max={today} onChange={(e) => { setFrom(e.target.value); setError(""); }} className={field} />
-        </label>
-        <label className="grid gap-1.5">
-          <span className="text-sm text-muted-foreground">To</span>
-          <input type="date" value={to} max={today} onChange={(e) => { setTo(e.target.value); setError(""); }} className={field} />
-        </label>
-        {error && (
+
+        <div className="grid grid-cols-2 gap-3">
+          {box("From", draft.from, draft.from === null)}
+          {box("To", draft.to, waitingForEnd)}
+        </div>
+        <div className="-mt-3 flex min-h-9 items-center justify-between gap-3 text-sm" aria-live="polite">
+          <p className="text-muted-foreground">{done ? `${days} day${days === 1 ? "" : "s"} selected` : waitingForEnd ? "Now tap the last day" : "Tap the first day"}</p>
+          {draft.from !== null && (
+            <button type="button" className="min-h-9 px-2 text-foreground underline-offset-4 hover:underline" onClick={() => setDraft({ from: null, to: null })}>
+              Clear
+            </button>
+          )}
+        </div>
+
+        <div className="rounded-2xl border border-[#262626] p-3">
+          <RangeCalendar value={draft} onChange={setDraft} max={today} />
+        </div>
+
+        {problem && (
           <p role="alert" className="text-sm text-destructive">
-            {error}
+            {problem}
           </p>
         )}
       </div>
@@ -163,7 +170,7 @@ function DateBar({ preset, range, compare, onPreset, onCompare }: { preset: Pres
             onClick={() => onPreset(it.key)}
             className={cn(
               "min-h-11 whitespace-nowrap rounded-xl border px-1 text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-4 sm:text-sm",
-              preset === it.key ? "border-foreground/60 bg-white/10 text-foreground" : "border-[#262626] text-muted-foreground hover:text-foreground",
+              preset === it.key ? "border-white bg-white font-medium text-black" : "border-[#262626] text-muted-foreground hover:border-white/40 hover:text-foreground",
             )}
           >
             {it.label}
