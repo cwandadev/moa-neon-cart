@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useAuth } from "./auth";
 import { supabase } from "./supabase";
 import { rowToProduct, type ProductRow } from "./catalog";
@@ -6,11 +6,13 @@ import { lineProductFor } from "./variants";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { showWishlistToast } from "@/components/shop/wishToast";
-import { PRODUCTS, type Category, type Product } from "./products";
+import { money, PRODUCTS, type Category, type Product } from "./products";
 import { usePersistedState } from "@/lib/persist";
 import { ScrollRestorer } from "@/components/ScrollRestorer";
 
 export type CartItem = { product: Product; qty: number };
+/** Something that changed in the cart because the shop's stock or prices changed. */
+export type CartIssue = { id: string; kind: "removed" | "reduced" | "price"; text: string };
 export type ChatMessage = { id: string; from: "client" | "staff"; text: string; at: string };
 
 export type AdminProduct = Product & { sku: string; cost: number };
@@ -155,6 +157,12 @@ type StoreValue = {
   isWished: (id: string) => boolean;
   cart: CartItem[];
   addToCart: (product: Product, qty?: number) => void;
+  /** Checks the stock right now, then adds. Says why when it cannot. */
+  addToCartChecked: (product: Product, qty?: number) => Promise<{ ok: boolean; added: number }>;
+  /** Looks at the database now and fixes the cart (gone items out, quantities lowered, prices updated). Returns what changed. */
+  validateCart: () => Promise<CartIssue[]>;
+  cartIssues: CartIssue[];
+  dismissCartIssues: () => void;
   removeFromCart: (id: string) => void;
   setQty: (id: string, qty: number) => void;
   clearCart: () => void;
@@ -273,21 +281,33 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [cart, cartReady]);
 
-  // After loading, refresh prices and stock from the database and drop items that are gone.
-  useEffect(() => {
-    if (!cartReady) return;
-    const snapshot = cart;
-    const ids = Array.from(new Set(snapshot.map((i) => i.product.baseId ?? i.product.id)));
-    if (ids.length === 0) return;
-    let cancelled = false;
-    void (async () => {
+  const cartRef = useRef(cart);
+  cartRef.current = cart;
+  const [cartIssues, setCartIssues] = useState<CartIssue[]>([]);
+  const validating = useRef<Promise<CartIssue[]> | null>(null);
+  const adding = useRef(false);
+
+  /**
+   * Looks at the database now and fixes the cart: items that are sold out or gone are taken out, quantities are
+   * lowered to what is left, and prices are updated. It returns what it changed, so the cart can say so.
+   * If the shop cannot be reached, the cart is left exactly as it is.
+   */
+  const validateCart = useCallback((): Promise<CartIssue[]> => {
+    if (validating.current) return validating.current;
+    const run = (async (): Promise<CartIssue[]> => {
+      const snapshot = cartRef.current;
+      const ids = Array.from(new Set(snapshot.map((i) => i.product.baseId ?? i.product.id)));
+      if (ids.length === 0) {
+        setCartIssues([]);
+        return [];
+      }
       try {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from("products")
           .select("*, category:categories(name), product_variants(*)")
           .in("id", ids)
           .is("archived_at", null);
-        if (cancelled || !data) return;
+        if (error || !data) return [];
         const rows = data as unknown as (ProductRow & { category: { name: string } | null })[];
         const fresh = new Map(
           rows.map((r) => [
@@ -306,24 +326,47 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if ((p.variants?.length ?? 0) > 0 || p.stock <= 0) return null;
           return { product: p, qty: Math.min(i.qty, p.stock) };
         };
-        const removed = snapshot.filter((i) => refreshed(i) === null).length;
+        const issues: CartIssue[] = [];
+        for (const i of snapshot) {
+          const n = refreshed(i);
+          const name = i.product.name;
+          if (!n) issues.push({ id: i.product.id, kind: "removed", text: `${name} is sold out or no longer available, so it was taken out of your cart.` });
+          else if (n.qty < i.qty) issues.push({ id: i.product.id, kind: "reduced", text: `${name}: only ${n.qty} left, so the quantity was lowered.` });
+          else if (n.product.price !== i.product.price) issues.push({ id: i.product.id, kind: "price", text: `${name}: the price changed from ${money(i.product.price)} to ${money(n.product.price)}.` });
+        }
         setCart((prev) =>
           prev.flatMap((i) => {
+            // Something added while we were checking is not in this answer: leave it for the next check.
+            if (!ids.includes(i.product.baseId ?? i.product.id)) return [i];
             const n = refreshed(i);
             return n ? [n] : [];
           }),
         );
-        if (removed > 0) toast("Some items in your cart are no longer available and were removed.");
+        setCartIssues(issues);
+        return issues;
       } catch {
-        /* keep the saved cart */
+        return []; // keep the saved cart
       }
     })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cartReady]);
+    validating.current = run;
+    void run.finally(() => {
+      validating.current = null;
+    });
+    return run;
+  }, []);
+
+  // After loading, check the saved cart against the database.
+  useEffect(() => {
+    if (!cartReady) return;
+    void validateCart().then((issues) => {
+      if (issues.some((i) => i.kind !== "price")) toast("Some items in your cart changed because of stock. Open your cart to see what.");
+    });
+  }, [cartReady, validateCart]);
   const [cartOpen, setCartOpen] = usePersistedState("moa:cart:open", false);
+  // Every time the cart is opened, check it again: stock can change while the page stays open.
+  useEffect(() => {
+    if (cartOpen && cartReady) void validateCart();
+  }, [cartOpen, cartReady, validateCart]);
   const [chatOpen, setChatOpen] = useState(false);
   const [products, setProducts] = useState<AdminProduct[]>(buildSeedProducts);
   const [productsLoaded, setProductsLoaded] = useState(false);
@@ -384,10 +427,69 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const addToCart = useCallback((product: Product, qty = 1) => {
     setCart((prev) => {
       const found = prev.find((i) => i.product.id === product.id);
-      if (found) return prev.map((i) => (i.product.id === product.id ? { ...i, qty: i.qty + qty } : i));
+      // The newest copy of the product replaces the saved one, so its stock is never older than the last add.
+      if (found) return prev.map((i) => (i.product.id === product.id ? { ...i, product, qty: i.qty + qty } : i));
       return [...prev, { product, qty }];
     });
   }, []);
+
+  /** Asks the database how many are left right now, and only adds what is really there. */
+  const addToCartChecked = useCallback(
+    async (product: Product, qty = 1): Promise<{ ok: boolean; added: number }> => {
+      if (adding.current) return { ok: false, added: 0 }; // a second tap while the first is being checked
+      adding.current = true;
+      try {
+        let available = product.stock; // if the shop cannot be reached, trust what the page knew
+        try {
+          const { data, error } = await supabase
+            .from("products")
+            .select("id, stock, archived_at, product_variants(id, stock)")
+            .eq("id", product.baseId ?? product.id)
+            .maybeSingle();
+          if (!error) {
+            const row = data as unknown as { stock: number; archived_at: string | null; product_variants: { id: string; stock: number }[] | null } | null;
+            if (!row || row.archived_at) {
+              toast.error("Sorry, this item is no longer available.");
+              return { ok: false, added: 0 };
+            }
+            const variants = row.product_variants ?? [];
+            if (product.variantId) {
+              const v = variants.find((x) => x.id === product.variantId);
+              if (!v) {
+                toast.error("Sorry, that option is no longer available.");
+                return { ok: false, added: 0 };
+              }
+              available = v.stock;
+            } else if (variants.length > 0) {
+              toast.error("Please choose a size or colour first.");
+              return { ok: false, added: 0 };
+            } else {
+              available = row.stock;
+            }
+          }
+        } catch {
+          /* offline: use what the page knew */
+        }
+        if (available <= 0) {
+          toast.error("Sorry, this just sold out.");
+          return { ok: false, added: 0 };
+        }
+        const inCart = cartRef.current.find((i) => i.product.id === product.id)?.qty ?? 0;
+        const room = available - inCart;
+        if (room <= 0) {
+          toast.error(`You already have all ${available} that are in stock in your cart.`);
+          return { ok: false, added: 0 };
+        }
+        const take = Math.min(qty, room);
+        addToCart({ ...product, stock: available }, take);
+        if (take < qty) toast(`Only ${available} in stock. We added ${take}.`);
+        return { ok: true, added: take };
+      } finally {
+        adding.current = false;
+      }
+    },
+    [addToCart],
+  );
 
   const toggleStock = useCallback((id: string) => {
     setProducts((ps) =>
@@ -519,6 +621,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       isWished: (id) => wishlist.includes(id),
       cart,
       addToCart,
+      addToCartChecked,
+      validateCart,
+      cartIssues,
+      dismissCartIssues: () => setCartIssues([]),
       removeFromCart: (id) => setCart((prev) => prev.filter((i) => i.product.id !== id)),
       setQty: (id, qty) =>
         setCart((prev) =>
@@ -563,7 +669,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             : []),
         ]),
     };
-  }, [wishlist, toggleWishlist, cart, addToCart, cartOpen, chatOpen, messages, products, orders, threads, toggleStock, updateStock, addProduct, updateProduct, deleteProduct, resetProducts, productsLoaded, addOrder, setOrderStatus, sendStaffMessage]);
+  }, [wishlist, toggleWishlist, cart, addToCart, addToCartChecked, validateCart, cartIssues, cartOpen, chatOpen, messages, products, orders, threads, toggleStock, updateStock, addProduct, updateProduct, deleteProduct, resetProducts, productsLoaded, addOrder, setOrderStatus, sendStaffMessage]);
 
   return <StoreContext.Provider value={value}><ScrollRestorer />
       {children}</StoreContext.Provider>;

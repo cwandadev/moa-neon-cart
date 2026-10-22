@@ -3,8 +3,11 @@ import { useCallback, useEffect, useState } from "react";
 import { useShellAlerts } from "@/components/admin/alertsContext";
 import { change } from "@/components/admin/charts";
 import { btn } from "@/components/admin/controls";
+import { AnimatedNumber, ChartCard, ChartSkeleton, Columns, Donut, ErrorBlock, Trend } from "@/components/admin/viz";
 import { EmptyState, Kpi, PageHead, Skeleton } from "@/components/moa/ui";
 import { ago } from "@/lib/adminTools";
+import { presetRange, STATUS_LABEL, useAnalytics, weekdayShort, type SalesData } from "@/lib/analytics";
+import { useAuth } from "@/lib/auth";
 import { money } from "@/lib/products";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -20,6 +23,7 @@ export const Route = createFileRoute("/admin/")({
 });
 
 const LOW_STOCK = 5;
+const KPI_LINK = "block rounded-2xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring hover:[&>*]:bg-white/[0.04]";
 const DAY = 24 * 60 * 60 * 1000;
 
 type Slim = { created_at: string; paid_at: string | null; total: number; payment_status: string; fulfilment_status: string };
@@ -67,6 +71,8 @@ const TONE_NUM = { green: "text-muted-foreground", orange: "text-warning", red: 
 
 function Overview() {
   const alerts = useShellAlerts();
+  const { isAdmin } = useAuth();
+  const trends = useAnalytics<SalesData>("analytics_sales", presetRange("7d"), { compare: true });
   const [stats, setStats] = useState<Stats | null>(null);
   const [recent, setRecent] = useState<RecentOrder[]>([]);
   const [stock, setStock] = useState<StockAlert[]>([]);
@@ -209,13 +215,66 @@ function Overview() {
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <Kpi label="Orders today" value={String(stats?.ordersToday ?? 0)} icon="bx-receipt" delta={od?.text} tone={od?.tone ?? "flat"} />
-            <Kpi label="Paid today" value={money(stats?.paidToday ?? 0)} icon="bx-trending-up" delta={pd?.text} tone={pd?.tone ?? "flat"} />
-            <Kpi label="Paid, last 7 days" value={money(stats?.paidWeek ?? 0)} icon="bx-calendar-week" />
-            <Kpi label="Awaiting payment" value={String(stats?.awaiting ?? 0)} icon="bx-time-five" />
+            {/* Each card opens the Analytics page on the matching numbers */}
+            <Link to="/admin/analytics" search={{ tab: "sales", range: "today" }} aria-label="Orders today: see the details in Analytics" className={KPI_LINK}>
+              <Kpi label="Orders today" value={String(stats?.ordersToday ?? 0)} icon="bx-receipt" delta={od?.text} tone={od?.tone ?? "flat"} />
+            </Link>
+            <Link to="/admin/analytics" search={{ tab: "sales", range: "today" }} aria-label="Paid today: see the details in Analytics" className={KPI_LINK}>
+              <Kpi label="Paid today" value={money(stats?.paidToday ?? 0)} icon="bx-trending-up" delta={pd?.text} tone={pd?.tone ?? "flat"} />
+            </Link>
+            <Link to="/admin/analytics" search={{ tab: "sales", range: "7d" }} aria-label="Paid, last 7 days: see the details in Analytics" className={KPI_LINK}>
+              <Kpi label="Paid, last 7 days" value={money(stats?.paidWeek ?? 0)} icon="bx-calendar-week" />
+            </Link>
+            <Link to="/admin/analytics" search={{ tab: "sales", range: "30d" }} aria-label="Awaiting payment: see the orders funnel in Analytics" className={KPI_LINK}>
+              <Kpi label="Awaiting payment" value={String(stats?.awaiting ?? 0)} icon="bx-time-five" />
+            </Link>
           </div>
         )}
         {stats && <p className="mt-3 text-sm text-muted-foreground">{stats.live} products on sale</p>}
+      </section>
+
+      <section aria-label="Last 7 days" className="mt-10">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 className="font-display text-lg font-semibold">Last 7 days</h2>
+          <Link to="/admin/analytics" search={{ tab: "sales", range: "7d" }} className="inline-flex min-h-11 items-center text-sm text-primary hover:underline">
+            Open analytics
+          </Link>
+        </div>
+        {trends.error ? (
+          <ErrorBlock message={trends.error} onRetry={() => void trends.reload()} />
+        ) : !trends.data ? (
+          <ChartSkeleton h={280} />
+        ) : trends.data.totals.orders === 0 ? (
+          <div className="rounded-2xl border border-[#262626] bg-card">
+            <EmptyState icon="bx-line-chart" title="No orders in the last 7 days" hint="The charts appear as soon as orders come in." />
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+            <ChartCard title={isAdmin && trends.data.totals.revenue !== null ? "Revenue" : "Orders"} hint="The dashed line is the 7 days before." className="xl:col-span-2">
+              <Trend
+                rows={trends.data.series.map((s) => ({ t: s.t, v: isAdmin && s.revenue !== null ? s.revenue : s.orders }))}
+                series={[{ key: "v", label: isAdmin && trends.data.totals.revenue !== null ? "Revenue" : "Orders" }]}
+                prev={trends.prev?.series.map((s) => (isAdmin && s.revenue !== null ? s.revenue : s.orders))}
+                grain="day"
+                format={isAdmin && trends.data.totals.revenue !== null ? (n) => money(n) : (n) => String(n)}
+                height={230}
+                summary={`Last 7 days: ${trends.data.totals.orders} orders.`}
+              />
+            </ChartCard>
+            <ChartCard title="Orders by status">
+              <Donut
+                items={trends.data.status.map((s) => ({ name: STATUS_LABEL[s.key] ?? s.key, value: s.n }))}
+                format={(n) => String(n)}
+                centerValue={<AnimatedNumber n={trends.data.totals.orders} format={(n) => String(n)} />}
+                centerLabel="orders"
+                summary="Orders by status in the last 7 days."
+              />
+            </ChartCard>
+            <ChartCard title="Orders per day" className="xl:col-span-3">
+              <Columns data={trends.data.series.map((s) => ({ label: weekdayShort(s.t), value: s.orders }))} format={(n) => String(n)} height={180} summary="Orders per day in the last 7 days." />
+            </ChartCard>
+          </div>
+        )}
       </section>
 
       <div className="mt-10 grid grid-cols-1 gap-10 xl:grid-cols-2">

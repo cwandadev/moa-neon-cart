@@ -17,9 +17,10 @@ import { EditOptionsDialog } from "./EditOptionsDialog";
  * Closing it only hides it. Open it again (or reload) and you are back where you were.
  */
 export function CartDrawer() {
-  const { cart, cartOpen, setCartOpen, removeFromCart, setQty, cartTotal, addToCart } = useStore();
+  const { cart, cartOpen, setCartOpen, removeFromCart, setQty, cartTotal, addToCart, cartIssues, dismissCartIssues, validateCart } = useStore();
   const [view, setView] = usePersistedState<"cart" | "checkout">("moa:cart:view", "cart");
   const [editing, setEditing] = useState<(typeof cart)[number] | null>(null);
+  const [checking, setChecking] = useState(false);
   const isMobile = useIsMobile();
   const frame = useAppFrame(cartOpen && isMobile);
   const navigate = useNavigate();
@@ -27,6 +28,14 @@ export function CartDrawer() {
   const hide = () => setCartOpen(false);
   const visibleHeight =
     typeof window !== "undefined" && frame ? Math.max(0, window.innerHeight - frame.top - frame.bottom) : 0;
+
+  /** Checks the stock one more time before the form. If something changed, stay here and say what. */
+  const goCheckout = async () => {
+    setChecking(true);
+    const issues = await validateCart();
+    setChecking(false);
+    if (issues.length === 0) setView("checkout");
+  };
 
   const remove = (item: (typeof cart)[number]) => {
     removeFromCart(item.product.id);
@@ -83,6 +92,29 @@ export function CartDrawer() {
                   </h2>
                 </div>
               </SwipeZone>
+
+              {cartIssues.length > 0 && (
+                <div role="alert" className="mx-5 mt-4 shrink-0 rounded-xl border border-warning/40 bg-warning/10 p-3 font-body text-sm">
+                  <div className="flex items-start gap-2">
+                    <i aria-hidden className="bx bx-info-circle mt-0.5 text-lg text-warning" />
+                    <ul className="grid min-w-0 flex-1 gap-1">
+                      {cartIssues.map((i) => (
+                        <li key={`${i.id}-${i.kind}`} className="break-words">
+                          {i.text}
+                        </li>
+                      ))}
+                    </ul>
+                    <button
+                      type="button"
+                      aria-label="Dismiss"
+                      onClick={dismissCartIssues}
+                      className="grid size-8 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      <i aria-hidden className="bx bx-x text-xl" />
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {cart.length === 0 ? (
                 <div className="grid flex-1 place-content-center justify-items-center gap-3 px-6 py-10 text-center">
@@ -208,9 +240,10 @@ export function CartDrawer() {
                     variant="neon"
                     size="lg"
                     className="mt-4 h-12 w-full rounded-xl text-base"
-                    onClick={() => setView("checkout")}
+                    disabled={checking}
+                    onClick={() => void goCheckout()}
                   >
-                    Checkout · {money(cartTotal)}
+                    {checking ? "Checking stock…" : `Checkout · ${money(cartTotal)}`}
                   </Button>
                   <button
                     type="button"

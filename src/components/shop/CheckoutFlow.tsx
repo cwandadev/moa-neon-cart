@@ -51,7 +51,7 @@ export function CheckoutFlow({
   const [paid, setPaid] = useState(false);
   const [ended, setEnded] = useState(false);
   const { ensureSession, user } = useAuth();
-  const { clearCart } = useStore();
+  const { clearCart, validateCart } = useStore();
   const navigate = useNavigate();
 
   const total = items.reduce((s, i) => s + i.qty * i.product.price, 0);
@@ -146,7 +146,22 @@ export function CheckoutFlow({
         },
       );
       if (order.error || !order.data?.order) {
-        setError(order.error ?? "Something went wrong. Please try again.");
+        const msg = order.error ?? "";
+        // The shop says something is not available: fix the cart and say what changed, instead of showing the raw message.
+        if (/not available|not enough stock|sold out|choose a size|option is not/i.test(msg)) {
+          const issues = !buyNow ? await validateCart() : [];
+          if (issues.length > 0 && onBack) {
+            onBack();
+            return;
+          }
+          setError(
+            buyNow
+              ? "Sorry, this item just sold out or is no longer available."
+              : "Some items are no longer available in the quantity you chose. Please check your cart.",
+          );
+          return;
+        }
+        setError(msg || "Something went wrong. Please try again.");
         return;
       }
       const code = order.data.order.code;

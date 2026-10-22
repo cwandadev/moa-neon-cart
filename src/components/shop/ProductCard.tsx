@@ -25,7 +25,7 @@ export function StockBadge({ product, className }: { product: Product; className
 }
 
 export function ProductCard({ product }: { product: Product }) {
-  const { toggleWishlist, isWished, addToCart, setCartOpen } = useStore();
+  const { toggleWishlist, isWished, addToCartChecked, setCartOpen } = useStore();
   const navigate = useNavigate();
   const wished = isWished(product.id);
   const [added, setAdded] = useState(false);
@@ -115,8 +115,9 @@ export function ProductCard({ product }: { product: Product }) {
               className="size-9 shrink-0 rounded-xl sm:size-10"
               disabled={soldOut}
               aria-label="Add to cart"
-              onClick={() => {
-                addToCart(product);
+              onClick={async () => {
+                const r = await addToCartChecked(product);
+                if (!r.ok) return;
                 setAdded(true);
                 window.setTimeout(() => setAdded(false), 1200);
                 toast.success("Added to cart", {
