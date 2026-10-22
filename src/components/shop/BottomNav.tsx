@@ -8,16 +8,16 @@ const cell =
   "relative flex h-16 flex-col items-center justify-center gap-0.5 rounded-2xl text-muted-foreground transition-colors hover:text-foreground active:bg-secondary/60";
 const labelClass = "font-body text-[10px] font-medium leading-none";
 
-// The logo in the middle: its size, the air the notch leaves round it, and how far its top sits above the top edge of the bar.
-// To move the logo, change LIFT only (smaller is lower, 0 puts its top level with the bar); the notch behind it follows.
-const LOGO = 60;
+// The logo in the middle. LOGO is its size (it was 64px before the notch was added), AIR is the gap the notch leaves round it, and SINK is how far
+// the logo's centre sits below the top edge of the bar (a smaller number is higher, 0 puts the centre on the edge). Changing LOGO does not move the
+// centre, and the notch behind the logo follows all three.
+const LOGO = 64;
 const AIR = 6;
-const LIFT = 24;
+const SINK = 6;
 const NOTCH_R = LOGO / 2 + AIR;
-const NOTCH_CY = LOGO / 2 - LIFT; // the notch circle is centred on the logo; the bar's top edge is y = 0
-const NOTCH_HALF = Math.sqrt(NOTCH_R ** 2 - (NOTCH_CY - 0.5) ** 2); // half the width of the notch where it meets the top edge
+const NOTCH_HALF = Math.sqrt(NOTCH_R ** 2 - (SINK - 0.5) ** 2); // half the width of the notch where it meets the top edge (the bar's top line is y = 0.5)
 const r2 = (n: number) => Math.round(n * 100) / 100;
-const NOTCH = `M0 .5H${r2(48 - NOTCH_HALF)}A${NOTCH_R} ${NOTCH_R} 0 ${NOTCH_CY > 0.5 ? 1 : 0} 0 ${r2(48 + NOTCH_HALF)} .5H96`;
+const NOTCH = `M0 .5H${r2(48 - NOTCH_HALF)}A${NOTCH_R} ${NOTCH_R} 0 ${SINK > 0.5 ? 1 : 0} 0 ${r2(48 + NOTCH_HALF)} .5H96`;
 
 export function BottomNav() {
   const { cartCount, wishlist, setCartOpen, chatOpen, setChatOpen } = useStore();
@@ -98,7 +98,7 @@ export function BottomNav() {
               aria-label="Home"
               aria-current={homeOn ? "page" : undefined}
               onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-              style={{ top: -LIFT }}
+              style={{ top: SINK - LOGO / 2 }}
               className="group absolute inset-x-0 bottom-0 flex flex-col items-center focus-visible:outline-none"
             >
               <span style={{ width: LOGO, height: LOGO }} className="grid place-items-center overflow-hidden rounded-full shadow-[0_10px_22px_-8px_rgba(0,0,0,0.75)] transition-transform duration-200 group-active:scale-95 group-focus-visible:ring-2 group-focus-visible:ring-ring">
