@@ -78,8 +78,8 @@ export function BottomNav() {
 
           <div className="relative w-24 shrink-0">
             <svg aria-hidden viewBox="0 0 96 68" className="absolute inset-0 size-full">
-              <path d="M0 .5H12.9A36 36 0 0 0 83.1 .5H96V67.5H0Z" className="fill-card" />
-              <path d="M0 .5H12.9A36 36 0 0 0 83.1 .5H96M0 67.5H96" fill="none" strokeWidth="1" vectorEffect="non-scaling-stroke" className="stroke-border" />
+              <path d="M0 .5H12A36 36 0 0 0 84 .5H96V67.5H0Z" className="fill-card" />
+              <path d="M0 .5H12A36 36 0 0 0 84 .5H96M0 67.5H96" fill="none" strokeWidth="1" vectorEffect="non-scaling-stroke" className="stroke-border" />
             </svg>
             {/* The centre of the app: the logo is raised out of the bar, and the whole column (logo and label) is one big tap target. */}
             <Link
@@ -87,7 +87,7 @@ export function BottomNav() {
               aria-label="Home"
               aria-current={homeOn ? "page" : undefined}
               onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-              className="group absolute inset-x-0 -top-[38px] bottom-0 flex flex-col items-center focus-visible:outline-none"
+              className="group absolute inset-x-0 -top-[30px] bottom-0 flex flex-col items-center focus-visible:outline-none"
             >
               <span className="grid size-[60px] place-items-center overflow-hidden rounded-full shadow-[0_10px_22px_-8px_rgba(0,0,0,0.75)] transition-transform duration-200 group-active:scale-95 group-focus-visible:ring-2 group-focus-visible:ring-ring">
                 <img src="/logo.svg" alt="" className="size-full object-cover" />

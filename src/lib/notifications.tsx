@@ -33,12 +33,14 @@ const toneStyle = (t: Tone) =>
     "--toast-action-fg": "#111111",
   }) as CSSProperties;
 
-type State = { items: Notif[]; unread: number; loaded: boolean; canDismiss: boolean };
-let state: State = { items: [], unread: 0, loaded: false, canDismiss: true };
+type State = { items: Notif[]; unread: number; loaded: boolean; canDismiss: boolean; hasMore: boolean; loadingMore: boolean };
+let state: State = { items: [], unread: 0, loaded: false, canDismiss: true, hasMore: false, loadingMore: false };
+const PAGE = 50;
+const COLUMNS = "id, kind, severity, title, body, link, read_at, created_at";
 const listeners = new Set<() => void>();
 
 function setItems(items: Notif[], loaded = true) {
-  state = { items, unread: items.filter((n) => !n.read_at).length, loaded, canDismiss: state.canDismiss };
+  state = { ...state, items, unread: items.filter((n) => !n.read_at).length, loaded };
   listeners.forEach((l) => l());
 }
 
@@ -86,6 +88,27 @@ export async function dismiss(ids: string[]) {
   if (ids.length === 0) return;
   setItems(state.items.filter((n) => !ids.includes(n.id)));
   await supabase.from("notifications").update({ dismissed_at: new Date().toISOString() }).in("id", ids);
+}
+
+/** Load the next page of older notifications, for the Notifications page. */
+export async function loadMore() {
+  if (state.loadingMore || !state.hasMore) return;
+  const oldest = state.items[state.items.length - 1]?.created_at;
+  if (!oldest) return;
+  state = { ...state, loadingMore: true };
+  listeners.forEach((l) => l());
+  try {
+    let q = supabase.from("notifications").select(COLUMNS).order("created_at", { ascending: false }).lt("created_at", oldest).limit(PAGE);
+    if (state.canDismiss) q = q.is("dismissed_at", null);
+    const { data, error } = await q;
+    const more = (error ? [] : data ?? []) as Notif[];
+    const known = new Set(state.items.map((n) => n.id));
+    state = { ...state, hasMore: !error && more.length >= PAGE };
+    setItems([...state.items, ...more.filter((n) => !known.has(n.id))]);
+  } finally {
+    state = { ...state, loadingMore: false };
+    listeners.forEach((l) => l());
+  }
 }
 
 /** Undo a clear. */
@@ -137,21 +160,24 @@ export function NotificationsHost() {
     let cancelled = false;
     void (async () => {
       try {
-        const cols = "id, kind, severity, title, body, link, read_at, created_at";
+        const cols = COLUMNS;
         let res = await supabase
           .from("notifications")
           .select(cols)
           .is("dismissed_at", null)
           .order("created_at", { ascending: false })
-          .limit(50);
+          .limit(PAGE);
         if (res.error && /dismissed_at/.test(res.error.message)) {
           // The database update that adds "clear notifications" has not been run yet: show everything, hide the clear actions.
           state = { ...state, canDismiss: false };
-          res = await supabase.from("notifications").select(cols).order("created_at", { ascending: false }).limit(50);
+          res = await supabase.from("notifications").select(cols).order("created_at", { ascending: false }).limit(PAGE);
         } else if (!res.error) {
           state = { ...state, canDismiss: true };
         }
-        if (!cancelled) setItems((res.data ?? []) as Notif[]);
+        if (!cancelled) {
+          state = { ...state, hasMore: !res.error && (res.data ?? []).length >= PAGE };
+          setItems((res.data ?? []) as Notif[]);
+        }
       } catch {
         if (!cancelled) setItems([]);
       }
@@ -165,7 +191,7 @@ export function NotificationsHost() {
         (payload) => {
           const n = payload.new as unknown as Notif;
           if (state.items.some((x) => x.id === n.id)) return;
-          setItems([n, ...state.items].slice(0, 50));
+          setItems([n, ...state.items]);
           // The admin alert system already announces new orders live.
           if (n.kind === "order_new") return;
           const t = SEV[n.severity] ?? SEV.info;

@@ -1077,12 +1077,12 @@ function Orders() {
   };
 
   const tabs: TabItem<Tab>[] = [
+    { key: "all", label: "All", count: counts.all },
     { key: "confirmed", label: "To dispatch", count: counts.confirmed, tone: "warning" },
     { key: "out_for_delivery", label: "On the way", count: counts.out_for_delivery, tone: "info" },
     { key: "pending", label: "Awaiting payment", count: counts.pending },
     { key: "delivered", label: "Delivered", count: counts.delivered },
     { key: "cancelled", label: "Cancelled", count: counts.cancelled },
-    { key: "all", label: "All", count: counts.all },
   ];
 
   const filtered = debounced.trim() !== "" || range !== "all";

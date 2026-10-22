@@ -1175,9 +1175,9 @@ function Products() {
   ];
 
   const tabs: TabItem<View>[] = [
+    { key: "all", label: "All", count: counts.all },
     { key: "active", label: "Active", count: counts.active },
     { key: "archived", label: "Archived", count: counts.archived },
-    { key: "all", label: "All", count: counts.all },
   ];
 
   return (
