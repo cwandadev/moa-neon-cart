@@ -8,6 +8,17 @@ const cell =
   "relative flex h-16 flex-col items-center justify-center gap-0.5 rounded-2xl text-muted-foreground transition-colors hover:text-foreground active:bg-secondary/60";
 const labelClass = "font-body text-[10px] font-medium leading-none";
 
+// The logo in the middle: its size, the air the notch leaves round it, and how far its top sits above the top edge of the bar.
+// To move the logo, change LIFT only (smaller is lower, 0 puts its top level with the bar); the notch behind it follows.
+const LOGO = 60;
+const AIR = 6;
+const LIFT = 24;
+const NOTCH_R = LOGO / 2 + AIR;
+const NOTCH_CY = LOGO / 2 - LIFT; // the notch circle is centred on the logo; the bar's top edge is y = 0
+const NOTCH_HALF = Math.sqrt(NOTCH_R ** 2 - (NOTCH_CY - 0.5) ** 2); // half the width of the notch where it meets the top edge
+const r2 = (n: number) => Math.round(n * 100) / 100;
+const NOTCH = `M0 .5H${r2(48 - NOTCH_HALF)}A${NOTCH_R} ${NOTCH_R} 0 ${NOTCH_CY > 0.5 ? 1 : 0} 0 ${r2(48 + NOTCH_HALF)} .5H96`;
+
 export function BottomNav() {
   const { cartCount, wishlist, setCartOpen, chatOpen, setChatOpen } = useStore();
   const chatUnread = useChatUnread();
@@ -78,8 +89,8 @@ export function BottomNav() {
 
           <div className="relative w-24 shrink-0">
             <svg aria-hidden viewBox="0 0 96 68" className="absolute inset-0 size-full">
-              <path d="M0 .5H12A36 36 0 0 0 84 .5H96V67.5H0Z" className="fill-card" />
-              <path d="M0 .5H12A36 36 0 0 0 84 .5H96M0 67.5H96" fill="none" strokeWidth="1" vectorEffect="non-scaling-stroke" className="stroke-border" />
+              <path d={`${NOTCH}V67.5H0Z`} className="fill-card" />
+              <path d={`${NOTCH}M0 67.5H96`} fill="none" strokeWidth="1" vectorEffect="non-scaling-stroke" className="stroke-border" />
             </svg>
             {/* The centre of the app: the logo is raised out of the bar, and the whole column (logo and label) is one big tap target. */}
             <Link
@@ -87,9 +98,10 @@ export function BottomNav() {
               aria-label="Home"
               aria-current={homeOn ? "page" : undefined}
               onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-              className="group absolute inset-x-0 -top-[30px] bottom-0 flex flex-col items-center focus-visible:outline-none"
+              style={{ top: -LIFT }}
+              className="group absolute inset-x-0 bottom-0 flex flex-col items-center focus-visible:outline-none"
             >
-              <span className="grid size-[60px] place-items-center overflow-hidden rounded-full shadow-[0_10px_22px_-8px_rgba(0,0,0,0.75)] transition-transform duration-200 group-active:scale-95 group-focus-visible:ring-2 group-focus-visible:ring-ring">
+              <span style={{ width: LOGO, height: LOGO }} className="grid place-items-center overflow-hidden rounded-full shadow-[0_10px_22px_-8px_rgba(0,0,0,0.75)] transition-transform duration-200 group-active:scale-95 group-focus-visible:ring-2 group-focus-visible:ring-ring">
                 <img src="/logo.svg" alt="" className="size-full object-cover" />
               </span>
             </Link>
