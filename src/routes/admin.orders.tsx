@@ -61,6 +61,7 @@ type Row = {
   cancel_reason: string | null;
   lat: number | null;
   lng: number | null;
+  warehouse_id: string | null;
   deliveries: DeliveryLite | DeliveryLite[] | null;
   order_items: Item[];
 };
@@ -71,7 +72,7 @@ type Counts = Record<Tab, number>;
 
 const PAGE = 25;
 const SELECT =
-  "id, code, created_at, paid_at, customer_name, phone, location, preferred_time, notes, total, payment_status, fulfilment_status, refund_status, cancel_reason, lat, lng, order_items(name, variant_label, image, qty, price), deliveries(status, failed_reason, proof_flag, rider:profiles!deliveries_rider_id_fkey(first_name, last_name))";
+  "id, code, created_at, paid_at, customer_name, phone, location, preferred_time, notes, total, payment_status, fulfilment_status, refund_status, cancel_reason, lat, lng, warehouse_id, order_items(name, variant_label, image, qty, price), deliveries(status, failed_reason, proof_flag, verified_by, rider:profiles!deliveries_rider_id_fkey(first_name, last_name))";
 
 const RANGES: Array<[Range, string]> = [
   ["all", "All time"],
@@ -488,6 +489,7 @@ type DeliveryLite = {
   status: "assigned" | "picked_up" | "delivered" | "failed";
   failed_reason: string | null;
   proof_flag: string | null;
+  verified_by: string | null;
   rider: { first_name: string; last_name: string } | null;
 };
 /** The delivery of an order, whichever way the database sent it (one object, or a list of one). */
@@ -505,7 +507,7 @@ function DeliveryLine({ o, compact }: { o: Row; compact?: boolean }) {
   if (!d) return o.fulfilment_status === "confirmed" ? <p className={cn(cls, "text-warning")}>Waiting for a rider</p> : null;
   const who = riderOf(o) ?? "A rider";
   if (d.status === "failed") return <p className={cn(cls, "text-destructive")}>Delivery failed · {who}</p>;
-  if (d.status === "delivered") return <p className={cn(cls, d.proof_flag === "far_from_pin" ? "text-warning" : "text-muted-foreground")}>Delivered by {who}{d.proof_flag === "far_from_pin" ? " · check the place" : ""}</p>;
+  if (d.status === "delivered") return <p className={cn(cls, d.proof_flag === "far_from_pin" || d.verified_by === "photo" ? "text-warning" : "text-muted-foreground")}>Delivered by {who}{d.verified_by === "photo" ? " · no code, check the photo" : ""}{d.proof_flag === "far_from_pin" ? " · check the place" : ""}</p>;
   return <p className={cn(cls, "text-info")}>{who} · {d.status === "picked_up" ? "on the way" : "to collect it"}</p>;
 }
 

@@ -148,14 +148,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           email: sessionEmail,
           role: (data.role as Role) ?? "customer",
         });
-        // A rider who has just signed in goes straight to the rider screen (once per sign-in).
+        // A rider lives in the rider screen: anywhere else in the app they are sent back to it (the password pages excepted).
         try {
-          if (data.role === "rider" && !window.location.pathname.startsWith("/rider") && !sessionStorage.getItem("moa:rider:sent")) {
-            sessionStorage.setItem("moa:rider:sent", "1");
-            window.location.assign("/rider");
-          }
+          const path = window.location.pathname;
+          const free = path.startsWith("/rider") || path.startsWith("/forgot-password") || path.startsWith("/reset-password");
+          if (data.role === "rider" && !free) window.location.replace("/rider");
         } catch {
-          /* no storage: stay where we are */
+          /* no window: nothing to do */
         }
       } catch {
         if (!cancelled) setProfile((p) => (p && p.id === sessionUserId ? p : null));
