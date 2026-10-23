@@ -113,7 +113,9 @@ export function SupportChat() {
     pathname === "/login" ||
     pathname === "/register" ||
     pathname === "/admin" ||
-    pathname.startsWith("/admin/");
+    pathname.startsWith("/admin/") ||
+    pathname === "/rider" ||
+    pathname.startsWith("/rider/");
 
   const frame = useAppFrame(open && isMobile && !hidden, { coverNav: true });
   const panelRef = useRef<HTMLDivElement | null>(null);

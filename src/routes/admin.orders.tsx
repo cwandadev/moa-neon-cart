@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { ActionMenu, type MenuItem } from "@/components/admin/ActionMenu";
 import { ActionBar, btn, Detail, FilterTabs, SearchField, field, type TabItem } from "@/components/admin/controls";
 import { AdminSheet } from "@/components/admin/AdminSheet";
+import { DeliveryPanel } from "@/components/admin/DeliveryPanel";
 import { EmptyState, PageHead, Skeleton } from "@/components/moa/ui";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -58,6 +59,9 @@ type Row = {
   fulfilment_status: string;
   refund_status: string;
   cancel_reason: string | null;
+  lat: number | null;
+  lng: number | null;
+  deliveries: DeliveryLite | DeliveryLite[] | null;
   order_items: Item[];
 };
 
@@ -67,7 +71,7 @@ type Counts = Record<Tab, number>;
 
 const PAGE = 25;
 const SELECT =
-  "id, code, created_at, paid_at, customer_name, phone, location, preferred_time, notes, total, payment_status, fulfilment_status, refund_status, cancel_reason, order_items(name, variant_label, image, qty, price)";
+  "id, code, created_at, paid_at, customer_name, phone, location, preferred_time, notes, total, payment_status, fulfilment_status, refund_status, cancel_reason, lat, lng, order_items(name, variant_label, image, qty, price), deliveries(status, failed_reason, proof_flag, rider:profiles!deliveries_rider_id_fkey(first_name, last_name))";
 
 const RANGES: Array<[Range, string]> = [
   ["all", "All time"],
@@ -480,9 +484,33 @@ function Thumbs({ items }: { items: Item[] }) {
   );
 }
 
+type DeliveryLite = {
+  status: "assigned" | "picked_up" | "delivered" | "failed";
+  failed_reason: string | null;
+  proof_flag: string | null;
+  rider: { first_name: string; last_name: string } | null;
+};
+/** The delivery of an order, whichever way the database sent it (one object, or a list of one). */
+const deliveryOf = (o: Row): DeliveryLite | null => (Array.isArray(o.deliveries) ? (o.deliveries[0] ?? null) : (o.deliveries ?? null));
+const riderOf = (o: Row): string | null => {
+  const r = deliveryOf(o)?.rider;
+  return r ? `${r.first_name} ${r.last_name}`.trim() || "A rider" : null;
+};
+
+/** One line on an order: who is delivering it, or that it is still waiting for a rider. */
+function DeliveryLine({ o, compact }: { o: Row; compact?: boolean }) {
+  const d = deliveryOf(o);
+  const cls = cn(compact ? "mt-1 text-xs" : "mt-2 text-sm");
+  if (o.fulfilment_status === "cancelled") return null;
+  if (!d) return o.fulfilment_status === "confirmed" ? <p className={cn(cls, "text-warning")}>Waiting for a rider</p> : null;
+  const who = riderOf(o) ?? "A rider";
+  if (d.status === "failed") return <p className={cn(cls, "text-destructive")}>Delivery failed · {who}</p>;
+  if (d.status === "delivered") return <p className={cn(cls, d.proof_flag === "far_from_pin" ? "text-warning" : "text-muted-foreground")}>Delivered by {who}{d.proof_flag === "far_from_pin" ? " · check the place" : ""}</p>;
+  return <p className={cn(cls, "text-info")}>{who} · {d.status === "picked_up" ? "on the way" : "to collect it"}</p>;
+}
+
 type Handlers = {
   open: (o: Row) => void;
-  advance: (o: Row, to: "out_for_delivery" | "delivered") => void;
   refund: (o: Row, action: "refund-status" | "retry-refund") => void;
   busyId: string | null;
   isAdmin: boolean;
@@ -491,16 +519,10 @@ type Handlers = {
 /** The one thing to do next with an order, as a button the size of a thumb. */
 function PrimaryAction({ o, h }: { o: Row; h: Handlers }) {
   const busy = h.busyId === o.id;
-  if (o.fulfilment_status === "confirmed")
+  if (o.fulfilment_status === "confirmed" || o.fulfilment_status === "out_for_delivery")
     return (
-      <button type="button" disabled={busy} onClick={() => h.advance(o, "out_for_delivery")} className={btn.primary}>
-        {busy ? "Saving…" : "Out for delivery"}
-      </button>
-    );
-  if (o.fulfilment_status === "out_for_delivery")
-    return (
-      <button type="button" disabled={busy} onClick={() => h.advance(o, "delivered")} className={btn.primary}>
-        {busy ? "Saving…" : "Mark delivered"}
+      <button type="button" onClick={() => h.open(o)} className={btn.primary}>
+        {o.fulfilment_status === "out_for_delivery" ? "Track delivery" : riderOf(o) ? "View delivery" : "Assign a rider"}
       </button>
     );
   if (o.fulfilment_status === "cancelled" && o.refund_status === "pending")
@@ -571,6 +593,7 @@ function OrderCard({
           </div>
           <p className="mt-3 truncate text-base">{o.customer_name}</p>
           <p className="truncate text-sm text-muted-foreground">{o.location}</p>
+          <DeliveryLine o={o} />
           <div className="mt-3 flex items-center gap-3">
             <Thumbs items={o.order_items} />
             <span className="text-sm text-muted-foreground">{itemsLabel(o.order_items)}</span>
@@ -661,6 +684,7 @@ function OrderTable({
                 <td className="px-3 py-3">
                   <p className="truncate">{o.customer_name}</p>
                   <p className="truncate text-xs text-muted-foreground">{o.location}</p>
+                  <DeliveryLine o={o} compact />
                 </td>
                 <td className="px-3 py-3">
                   <div className="flex items-center gap-2">
@@ -860,7 +884,6 @@ function Orders() {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkCancel, setBulkCancel] = useState<Row[] | null>(null);
   const [exporting, setExporting] = useState(false);
   const [cancelFor, setCancelFor] = useState<Row | null>(null);
@@ -933,42 +956,6 @@ function Orders() {
 
   // ----- actions -----
 
-  const patchRow = (id: string, patch: Partial<Row>) => {
-    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
-    if (lastSheetRow.current?.id === id) lastSheetRow.current = { ...lastSheetRow.current, ...patch };
-  };
-
-  const advance = async (o: Row, to: "out_for_delivery" | "delivered") => {
-    setBusyId(o.id);
-    const { error } = await supabase.from("orders").update({ fulfilment_status: to }).eq("id", o.id);
-    setBusyId(null);
-    if (error) {
-      toast.error(error.message);
-      return;
-    }
-    patchRow(o.id, { fulfilment_status: to });
-    toast.success(to === "delivered" ? `${o.code} marked delivered.` : `${o.code} is out for delivery.`);
-    void load();
-  };
-
-  /** Change the status of every selected order that is in the right status. */
-  const moveSelected = async (from: "confirmed" | "out_for_delivery", to: "out_for_delivery" | "delivered", done: string) => {
-    const ids = selRows.filter((o) => o.fulfilment_status === from).map((o) => o.id);
-    if (ids.length === 0) return;
-    setBulkBusy(true);
-    const { error } = await supabase.from("orders").update({ fulfilment_status: to }).in("id", ids).eq("fulfilment_status", from);
-    setBulkBusy(false);
-    if (error) {
-      toast.error(error.message);
-      return;
-    }
-    toast.success(`${ids.length} order${ids.length === 1 ? "" : "s"} ${done}.`);
-    setSelected(new Set());
-    setSelectMode(false);
-    void load();
-  };
-  const dispatchSelected = () => moveSelected("confirmed", "out_for_delivery", "marked out for delivery");
-  const deliverSelected = () => moveSelected("out_for_delivery", "delivered", "marked delivered");
 
   const refundAction = async (o: Row, action: "refund-status" | "retry-refund") => {
     setBusyId(o.id);
@@ -1043,8 +1030,6 @@ function Orders() {
     ["pending", "confirmed", "out_for_delivery"].includes(o.fulfilment_status) && (o.payment_status !== "paid" || isAdmin);
 
   const selRows = rows.filter((o) => selected.has(o.id));
-  const nDispatch = selRows.filter((o) => o.fulfilment_status === "confirmed").length;
-  const nDeliver = selRows.filter((o) => o.fulfilment_status === "out_for_delivery").length;
   const cancellable = selRows.filter(canCancel);
   const allSelected = rows.length > 0 && rows.every((o) => selected.has(o.id));
   const press = useLongPress((id) => {
@@ -1070,7 +1055,6 @@ function Orders() {
 
   const handlers: Handlers = {
     open,
-    advance: (o, to) => void advance(o, to),
     refund: (o, a) => void refundAction(o, a),
     busyId,
     isAdmin,
@@ -1101,7 +1085,7 @@ function Orders() {
     <>
       <PageHead
         title="Orders"
-        subtitle="Paid orders wait under To dispatch. They are marked delivered when the customer confirms, or 3 days after dispatch."
+        subtitle="Paid orders wait for a rider, who takes them, collects them and delivers them with the customer's code and a photo."
         actions={
           <>
             <button
@@ -1270,16 +1254,6 @@ function Orders() {
           More
           <i aria-hidden className="bx bx-chevron-up text-lg" />
         </ActionMenu>
-        {nDeliver > 0 && (
-          <button type="button" disabled={bulkBusy} onClick={() => void deliverSelected()} className={cn(nDispatch > 0 ? btn.ghost : btn.primary, "flex-1")}>
-            {bulkBusy ? "Working…" : `Delivered (${nDeliver})`}
-          </button>
-        )}
-        {nDispatch > 0 && (
-          <button type="button" disabled={bulkBusy} onClick={() => void dispatchSelected()} className={cn(btn.primary, "flex-1")}>
-            {bulkBusy ? "Working…" : `Out for delivery (${nDispatch})`}
-          </button>
-        )}
       </ActionBar>
 
       {bulkCancel && (
@@ -1306,11 +1280,6 @@ function Orders() {
         footer={
           sheetRow ? (
             <div className="grid gap-2">
-              {(sheetRow.fulfilment_status === "confirmed" || sheetRow.fulfilment_status === "out_for_delivery") && (
-                <div className="grid">
-                  <PrimaryAction o={sheetRow} h={{ ...handlers, open: () => undefined }} />
-                </div>
-              )}
               {sheetRow.fulfilment_status === "pending" && (
                 <p className="text-center text-sm text-muted-foreground">Waiting for the customer to pay.</p>
               )}
@@ -1339,11 +1308,14 @@ function Orders() {
         }
       >
         {sheetRow && (
-          <OrderDetails
-            o={sheetRow}
-            shown={phoneShown.has(sheetRow.id)}
-            onShow={() => setPhoneShown((s) => new Set(s).add(sheetRow.id))}
-          />
+          <>
+            <OrderDetails
+              o={sheetRow}
+              shown={phoneShown.has(sheetRow.id)}
+              onShow={() => setPhoneShown((s) => new Set(s).add(sheetRow.id))}
+            />
+            <DeliveryPanel order={sheetRow} onChanged={() => void load()} />
+          </>
         )}
       </AdminSheet>
 

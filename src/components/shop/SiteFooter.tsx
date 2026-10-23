@@ -7,7 +7,7 @@ import { useStore } from "@/lib/store";
 import { SITE } from "@/lib/site";
 
 /** Pages that are not part of the shop front: no footer there. */
-const HIDDEN = ["/admin", "/login", "/register", "/forgot-password", "/reset-password"];
+const HIDDEN = ["/admin", "/rider", "/login", "/register", "/forgot-password", "/reset-password"];
 
 const head = "font-body text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground";
 const link = "font-body text-sm text-muted-foreground transition-colors hover:text-foreground";
