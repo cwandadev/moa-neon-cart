@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
+import { LocationPinButton } from "@/components/shop/LocationPinButton";
 import { PaymentPanel } from "@/components/shop/PaymentPanel";
 import { Header } from "@/components/shop/Header";
 import {
@@ -12,8 +13,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth";
+import { telLink, type CustomerDelivery, type Pin } from "@/lib/delivery";
 import { money } from "@/lib/products";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -84,11 +85,19 @@ function OrderTracking() {
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState("");
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [delivery, setDelivery] = useState<CustomerDelivery | null>(null);
 
   const load = useCallback(async () => {
     try {
       const { data } = await supabase.from("orders").select(COLS).eq("code", code).maybeSingle();
-      setOrder((data as unknown as OrderRow | null) ?? null);
+      const row = (data as unknown as OrderRow | null) ?? null;
+      setOrder(row);
+      if (row && row.fulfilment_status !== "cancelled") {
+        const d = await supabase.rpc("my_order_delivery", { p_code: row.code });
+        setDelivery((d.data as CustomerDelivery | null) ?? null);
+      } else {
+        setDelivery(null);
+      }
     } catch {
       setOrder(null);
     } finally {
@@ -120,7 +129,18 @@ function OrderTracking() {
     };
   }, [orderUuid, load]);
 
-  const act = async (fn: "confirm_order_received" | "cancel_my_unpaid_order") => {
+  const savePin = async (p: Pin | null) => {
+    if (!order || !p) return;
+    const { error } = await supabase.rpc("set_order_pin", { p_code: order.code, p_lat: p.lat, p_lng: p.lng, p_accuracy: p.accuracy });
+    if (error) {
+      setActionError(error.message);
+      return;
+    }
+    setActionError("");
+    await load();
+  };
+
+  const act = async (fn: "cancel_my_unpaid_order") => {
     if (!order) return;
     setBusy(true);
     setActionError("");
@@ -217,14 +237,39 @@ function OrderTracking() {
             </>
           )}
 
+          {order.fulfilment_status === "confirmed" && delivery?.has_rider && delivery.rider_first_name && (
+            <p className="mt-3 font-body text-sm text-muted-foreground">{delivery.rider_first_name} will collect and deliver your order.</p>
+          )}
           {order.fulfilment_status === "out_for_delivery" && (
-            <div className="mt-4 grid gap-2 border-t border-border pt-4">
-              <Button variant="neon" size="lg" disabled={busy} onClick={() => void act("confirm_order_received")}>
-                I received my order
-              </Button>
-              <p className="font-body text-xs text-muted-foreground">
-                Tap this when your order arrives. If you do not, we mark it delivered 3 days after dispatch.
-              </p>
+            <div className="mt-4 grid gap-3 border-t border-border pt-4">
+              {delivery?.code ? (
+                <>
+                  <p className="font-display text-sm font-medium tracking-tight">Your delivery code</p>
+                  <p
+                    aria-label={`Your delivery code is ${delivery.code.split("").join(" ")}`}
+                    className="rounded-2xl bg-secondary/60 py-4 text-center font-display text-5xl font-semibold tracking-[0.35em]"
+                  >
+                    {delivery.code}
+                  </p>
+                  <p className="font-body text-xs text-muted-foreground">
+                    Give this code to the rider only when you have your order in your hands. They will also take a photo.
+                  </p>
+                </>
+              ) : (
+                <p className="font-body text-xs text-muted-foreground">The office will confirm here when your order has arrived.</p>
+              )}
+              {delivery?.rider_first_name && (
+                <div className="flex items-center justify-between gap-3 font-body text-sm">
+                  <span>
+                    Your rider: <span className="font-medium">{delivery.rider_first_name}</span>
+                  </span>
+                  {delivery.rider_phone && (
+                    <a href={telLink(delivery.rider_phone)} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-border px-3 hover:bg-secondary">
+                      <i aria-hidden className="bx bx-phone text-lg" /> Call
+                    </a>
+                  )}
+                </div>
+              )}
             </div>
           )}
           {actionError && <p className="mt-3 font-body text-sm text-destructive">{actionError}</p>}
@@ -241,6 +286,14 @@ function OrderTracking() {
             >
               Cancel this order
             </button>
+          </section>
+        )}
+
+        {["pending", "confirmed", "out_for_delivery"].includes(order.fulfilment_status) && (
+          <section className="mt-4 rounded-2xl border border-border bg-card/60 p-5">
+            <h2 className="font-display text-sm font-medium tracking-tight">Help your rider find you</h2>
+            <p className="mb-3 mt-1 font-body text-xs text-muted-foreground">Share your exact location, and the rider can navigate straight to you.</p>
+            <LocationPinButton value={delivery?.pin ? { lat: 0, lng: 0, accuracy: null } : null} onChange={savePin} canRemove={false} />
           </section>
         )}
 

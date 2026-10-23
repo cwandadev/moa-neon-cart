@@ -9,7 +9,7 @@ import {
 } from "react";
 import { supabase } from "./supabase";
 
-export type Role = "customer" | "staff" | "admin";
+export type Role = "customer" | "staff" | "admin" | "rider";
 
 export type AuthUser = {
   id: string;
@@ -148,6 +148,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           email: sessionEmail,
           role: (data.role as Role) ?? "customer",
         });
+        // A rider who has just signed in goes straight to the rider screen (once per sign-in).
+        try {
+          if (data.role === "rider" && !window.location.pathname.startsWith("/rider") && !sessionStorage.getItem("moa:rider:sent")) {
+            sessionStorage.setItem("moa:rider:sent", "1");
+            window.location.assign("/rider");
+          }
+        } catch {
+          /* no storage: stay where we are */
+        }
       } catch {
         if (!cancelled) setProfile((p) => (p && p.id === sessionUserId ? p : null));
       } finally {

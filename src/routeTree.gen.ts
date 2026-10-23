@@ -21,6 +21,7 @@ import { Route as PrivacyPolicyRouteImport } from './routes/privacy-policy'
 import { Route as RegisterRouteImport } from './routes/register'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as ReturnsRouteImport } from './routes/returns'
+import { Route as RiderRouteImport } from './routes/rider'
 import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as TermsRouteImport } from './routes/terms'
 import { Route as WishlistRouteImport } from './routes/wishlist'
@@ -32,6 +33,7 @@ import { Route as AdminInventoryRouteImport } from './routes/admin.inventory'
 import { Route as AdminNotificationsRouteImport } from './routes/admin.notifications'
 import { Route as AdminOrdersRouteImport } from './routes/admin.orders'
 import { Route as AdminProductsRouteImport } from './routes/admin.products'
+import { Route as AdminRidersRouteImport } from './routes/admin.riders'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
 import { Route as OrdersIndexRouteImport } from './routes/orders.index'
 import { Route as OrdersOrderIdRouteImport } from './routes/orders.$orderId'
@@ -98,6 +100,11 @@ const ReturnsRoute = ReturnsRouteImport.update({
   path: '/returns',
   getParentRoute: () => rootRouteImport,
 } as any)
+const RiderRoute = RiderRouteImport.update({
+  id: '/rider',
+  path: '/rider',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
   id: '/sitemap.xml',
   path: '/sitemap.xml',
@@ -153,6 +160,11 @@ const AdminProductsRoute = AdminProductsRouteImport.update({
   path: '/products',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminRidersRoute = AdminRidersRouteImport.update({
+  id: '/riders',
+  path: '/riders',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminUsersRoute = AdminUsersRouteImport.update({
   id: '/users',
   path: '/users',
@@ -192,6 +204,7 @@ export interface FileRoutesByFullPath {
   '/register': typeof RegisterRoute
   '/reset-password': typeof ResetPasswordRoute
   '/returns': typeof ReturnsRoute
+  '/rider': typeof RiderRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/terms': typeof TermsRoute
   '/wishlist': typeof WishlistRoute
@@ -202,6 +215,7 @@ export interface FileRoutesByFullPath {
   '/admin/notifications': typeof AdminNotificationsRoute
   '/admin/orders': typeof AdminOrdersRoute
   '/admin/products': typeof AdminProductsRoute
+  '/admin/riders': typeof AdminRidersRoute
   '/admin/users': typeof AdminUsersRoute
   '/orders/$orderId': typeof OrdersOrderIdRoute
   '/product/$productId': typeof ProductProductIdRoute
@@ -221,6 +235,7 @@ export interface FileRoutesByTo {
   '/register': typeof RegisterRoute
   '/reset-password': typeof ResetPasswordRoute
   '/returns': typeof ReturnsRoute
+  '/rider': typeof RiderRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/terms': typeof TermsRoute
   '/wishlist': typeof WishlistRoute
@@ -231,6 +246,7 @@ export interface FileRoutesByTo {
   '/admin/notifications': typeof AdminNotificationsRoute
   '/admin/orders': typeof AdminOrdersRoute
   '/admin/products': typeof AdminProductsRoute
+  '/admin/riders': typeof AdminRidersRoute
   '/admin/users': typeof AdminUsersRoute
   '/orders/$orderId': typeof OrdersOrderIdRoute
   '/product/$productId': typeof ProductProductIdRoute
@@ -252,6 +268,7 @@ export interface FileRoutesById {
   '/register': typeof RegisterRoute
   '/reset-password': typeof ResetPasswordRoute
   '/returns': typeof ReturnsRoute
+  '/rider': typeof RiderRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/terms': typeof TermsRoute
   '/wishlist': typeof WishlistRoute
@@ -262,6 +279,7 @@ export interface FileRoutesById {
   '/admin/notifications': typeof AdminNotificationsRoute
   '/admin/orders': typeof AdminOrdersRoute
   '/admin/products': typeof AdminProductsRoute
+  '/admin/riders': typeof AdminRidersRoute
   '/admin/users': typeof AdminUsersRoute
   '/orders/$orderId': typeof OrdersOrderIdRoute
   '/product/$productId': typeof ProductProductIdRoute
@@ -284,6 +302,7 @@ export interface FileRouteTypes {
     | '/register'
     | '/reset-password'
     | '/returns'
+    | '/rider'
     | '/sitemap.xml'
     | '/terms'
     | '/wishlist'
@@ -294,6 +313,7 @@ export interface FileRouteTypes {
     | '/admin/notifications'
     | '/admin/orders'
     | '/admin/products'
+    | '/admin/riders'
     | '/admin/users'
     | '/orders/$orderId'
     | '/product/$productId'
@@ -313,6 +333,7 @@ export interface FileRouteTypes {
     | '/register'
     | '/reset-password'
     | '/returns'
+    | '/rider'
     | '/sitemap.xml'
     | '/terms'
     | '/wishlist'
@@ -323,6 +344,7 @@ export interface FileRouteTypes {
     | '/admin/notifications'
     | '/admin/orders'
     | '/admin/products'
+    | '/admin/riders'
     | '/admin/users'
     | '/orders/$orderId'
     | '/product/$productId'
@@ -343,6 +365,7 @@ export interface FileRouteTypes {
     | '/register'
     | '/reset-password'
     | '/returns'
+    | '/rider'
     | '/sitemap.xml'
     | '/terms'
     | '/wishlist'
@@ -353,6 +376,7 @@ export interface FileRouteTypes {
     | '/admin/notifications'
     | '/admin/orders'
     | '/admin/products'
+    | '/admin/riders'
     | '/admin/users'
     | '/orders/$orderId'
     | '/product/$productId'
@@ -374,6 +398,7 @@ export interface RootRouteChildren {
   RegisterRoute: typeof RegisterRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   ReturnsRoute: typeof ReturnsRoute
+  RiderRoute: typeof RiderRoute
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   TermsRoute: typeof TermsRoute
   WishlistRoute: typeof WishlistRoute
@@ -469,6 +494,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ReturnsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/rider': {
+      id: '/rider'
+      path: '/rider'
+      fullPath: '/rider'
+      preLoaderRoute: typeof RiderRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/sitemap.xml': {
       id: '/sitemap.xml'
       path: '/sitemap.xml'
@@ -546,6 +578,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminProductsRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/riders': {
+      id: '/admin/riders'
+      path: '/riders'
+      fullPath: '/admin/riders'
+      preLoaderRoute: typeof AdminRidersRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/users': {
       id: '/admin/users'
       path: '/users'
@@ -592,6 +631,7 @@ interface AdminRouteChildren {
   AdminNotificationsRoute: typeof AdminNotificationsRoute
   AdminOrdersRoute: typeof AdminOrdersRoute
   AdminProductsRoute: typeof AdminProductsRoute
+  AdminRidersRoute: typeof AdminRidersRoute
   AdminUsersRoute: typeof AdminUsersRoute
   AdminIndexRoute: typeof AdminIndexRoute
 }
@@ -604,6 +644,7 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminNotificationsRoute: AdminNotificationsRoute,
   AdminOrdersRoute: AdminOrdersRoute,
   AdminProductsRoute: AdminProductsRoute,
+  AdminRidersRoute: AdminRidersRoute,
   AdminUsersRoute: AdminUsersRoute,
   AdminIndexRoute: AdminIndexRoute,
 }
@@ -623,6 +664,7 @@ const rootRouteChildren: RootRouteChildren = {
   RegisterRoute: RegisterRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   ReturnsRoute: ReturnsRoute,
+  RiderRoute: RiderRoute,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
   TermsRoute: TermsRoute,
   WishlistRoute: WishlistRoute,

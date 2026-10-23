@@ -1,11 +1,13 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
+import { LocationPinButton } from "@/components/shop/LocationPinButton";
 import { PaymentPanel } from "@/components/shop/PaymentPanel";
 import { SwipeZone } from "@/components/shop/SwipeZone";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/lib/auth";
+import type { Pin } from "@/lib/delivery";
 import { callFn, guessProvider, normalizePhone } from "@/lib/momo";
 import { usePersistedState } from "@/lib/persist";
 import { money, type Product } from "@/lib/products";
@@ -48,6 +50,7 @@ export function CheckoutFlow({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [showItems, setShowItems] = useState(false);
+  const [pin, setPin] = useState<Pin | null>(null);
   const [paid, setPaid] = useState(false);
   const [ended, setEnded] = useState(false);
   const { ensureSession, user } = useAuth();
@@ -104,6 +107,7 @@ export function CheckoutFlow({
     setUseOther(false);
     setOtherPhone("");
     setError("");
+    setPin(null);
   };
 
   const finish = () => {
@@ -166,6 +170,13 @@ export function CheckoutFlow({
       }
       const code = order.data.order.code;
       const payments = Boolean(order.data.payments_enabled);
+      if (pin) {
+        try {
+          await supabase.rpc("set_order_pin", { p_code: code, p_lat: pin.lat, p_lng: pin.lng, p_accuracy: pin.accuracy });
+        } catch {
+          /* the order is saved; the customer can add the location on the order page */
+        }
+      }
       if (!buyNow) clearCart();
 
       // 2. Start the payment right away, so one tap does both.
@@ -361,8 +372,9 @@ export function CheckoutFlow({
                   autoComplete="street-address"
                   className={field}
                 />
+                <LocationPinButton value={pin} onChange={setPin} />
                 <p className="font-body text-xs text-muted-foreground">
-                  We call your phone number if we need directions.
+                  Sharing your exact location helps the rider find you. We call your phone number if we need directions.
                 </p>
               </div>
             </section>
