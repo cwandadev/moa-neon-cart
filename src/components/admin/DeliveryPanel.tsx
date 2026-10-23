@@ -20,15 +20,26 @@ type DeliveryRow = {
   proof_distance_m: number | null;
   proof_flag: "far_from_pin" | "no_location" | "no_pin" | null;
   override_reason: string | null;
+  verified_by: "code" | "photo" | "office" | null;
+  needs_review: boolean;
+  fallback_reason: string | null;
+  received_by: string | null;
   rider: Person;
 };
 type EventRow = { id: string; event: string; detail: Record<string, unknown> | null; created_at: string; actor: Person };
 type RiderOption = { id: string; first_name: string; last_name: string };
+type WarehouseOption = { id: string; name: string; address: string };
 
-export type PanelOrder = { id: string; code: string; fulfilment_status: string; lat: number | null; lng: number | null };
+export type PanelOrder = { id: string; code: string; fulfilment_status: string; lat: number | null; lng: number | null; warehouse_id?: string | null };
 
 const nameOf = (p: Person | undefined) => (p ? `${p.first_name} ${p.last_name}`.trim() || "A rider" : "Someone");
 const when = (iso: string) => new Date(iso).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+
+const FALLBACK_TEXT: Record<string, string> = {
+  no_phone: "The customer had no phone or no battery",
+  code_not_working: "The customer could not find or read the code",
+  someone_else: "Someone else received it",
+};
 
 const FLAG_TEXT: Record<string, string> = {
   far_from_pin: "The rider was far from the customer's pin when completing. Worth a look.",
@@ -57,7 +68,13 @@ function eventText(e: EventRow): string {
     case "code_reset":
       return `${who} unlocked the code`;
     case "delivered":
-      return "Delivered with the code and a photo";
+      return "Delivered with the customer's code";
+    case "delivered_no_code":
+      return `Delivered without a code: ${FALLBACK_TEXT[String(d["reason"] ?? "")] ?? "no code"}. Received by ${String(d["received_by"] ?? "someone")}`;
+    case "reviewed":
+      return `${who} checked the photo`;
+    case "warehouse_changed":
+      return `${who} changed where it is collected: ${String(d["warehouse"] ?? "")}`;
     case "failed":
       return `Could not deliver: ${failLabel(String(d["reason"] ?? ""))}${d["note"] ? `. ${String(d["note"])}` : ""}`;
     case "override_delivered":
@@ -72,20 +89,22 @@ export function DeliveryPanel({ order, onChanged }: { order: PanelOrder; onChang
   const [delivery, setDelivery] = useState<DeliveryRow | null>(null);
   const [events, setEvents] = useState<EventRow[]>([]);
   const [riders, setRiders] = useState<RiderOption[]>([]);
+  const [warehouses, setWarehouses] = useState<WarehouseOption[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [pick, setPick] = useState("");
+  const [pickWarehouse, setPickWarehouse] = useState("");
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [showCode, setShowCode] = useState(false);
   const [override, setOverride] = useState(false);
   const [reason, setReason] = useState("");
 
   const load = useCallback(async () => {
-    const [d, e, r] = await Promise.all([
+    const [d, e, r, w] = await Promise.all([
       supabase
         .from("deliveries")
         .select(
-          "id, status, code, code_attempts, assigned_at, picked_up_at, delivered_at, failed_reason, failed_note, proof_path, proof_distance_m, proof_flag, override_reason, rider:profiles!deliveries_rider_id_fkey(first_name, last_name, phone)",
+          "id, status, code, code_attempts, assigned_at, picked_up_at, delivered_at, failed_reason, failed_note, proof_path, proof_distance_m, proof_flag, override_reason, verified_by, needs_review, fallback_reason, received_by, rider:profiles!deliveries_rider_id_fkey(first_name, last_name, phone)",
         )
         .eq("order_id", order.id)
         .maybeSingle(),
@@ -95,10 +114,12 @@ export function DeliveryPanel({ order, onChanged }: { order: PanelOrder; onChang
         .eq("order_id", order.id)
         .order("created_at", { ascending: true }),
       supabase.from("profiles").select("id, first_name, last_name").eq("role", "rider").order("first_name"),
+      supabase.from("warehouses").select("id, name, address").eq("active", true).order("name"),
     ]);
     setDelivery((d.data as unknown as DeliveryRow | null) ?? null);
     setEvents(((e.data as unknown as EventRow[] | null) ?? []).slice(-30));
     setRiders((r.data as RiderOption[] | null) ?? []);
+    setWarehouses((w.data as WarehouseOption[] | null) ?? []);
     setLoaded(true);
   }, [order.id]);
 
@@ -108,6 +129,7 @@ export function DeliveryPanel({ order, onChanged }: { order: PanelOrder; onChang
     setOverride(false);
     setReason("");
     setPick("");
+    setPickWarehouse("");
     void load();
   }, [load, order.fulfilment_status]);
 
@@ -147,6 +169,8 @@ export function DeliveryPanel({ order, onChanged }: { order: PanelOrder; onChang
   if (!loaded) return <section aria-label="Delivery" className="mt-6 h-24 animate-pulse rounded-2xl border border-[#262626] bg-white/[0.03]" />;
 
   const canAssign = !delivery || delivery.status === "assigned" || delivery.status === "failed";
+  const canMoveWarehouse = (status === "confirmed" || status === "out_for_delivery") && (!delivery || delivery.status === "assigned" || delivery.status === "failed");
+  const here = warehouses.find((w) => w.id === order.warehouse_id);
   const canOverride = status === "confirmed" || status === "out_for_delivery";
   const label = !delivery
     ? status === "confirmed"
@@ -167,6 +191,33 @@ export function DeliveryPanel({ order, onChanged }: { order: PanelOrder; onChang
         <h3 className="font-display text-sm font-medium">Delivery</h3>
         <span className={cn("text-sm font-medium", tone)}>{label}</span>
       </div>
+
+      {(here || canMoveWarehouse) && warehouses.length > 0 && (
+        <div className="grid gap-2 text-sm">
+          <p>
+            <span className="text-muted-foreground">Collected from: </span>
+            {here ? <span>{here.name}{here.address ? ` · ${here.address}` : ""}</span> : <span className="text-muted-foreground">not chosen yet</span>}
+          </p>
+          {canMoveWarehouse && warehouses.length > 1 && (
+            <div className="flex gap-2">
+              <label htmlFor={`wh-${order.id}`} className="sr-only">
+                Collect from another warehouse
+              </label>
+              <select id={`wh-${order.id}`} className={cn(field, "min-w-0 flex-1")} value={pickWarehouse} onChange={(e) => setPickWarehouse(e.target.value)}>
+                <option value="">Collect from another warehouse…</option>
+                {warehouses.filter((w) => w.id !== order.warehouse_id).map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name}
+                  </option>
+                ))}
+              </select>
+              <button type="button" className={btn.ghost} disabled={busy || !pickWarehouse} onClick={() => void run("admin_set_order_warehouse", { p_order_id: order.id, p_warehouse_id: pickWarehouse }, "The collection point was changed.")}>
+                Change
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {delivery && (
         <div className="grid gap-1 text-sm">
@@ -217,6 +268,18 @@ export function DeliveryPanel({ order, onChanged }: { order: PanelOrder; onChang
 
       {delivery?.status === "delivered" && (
         <div className="grid gap-2">
+          <p className={cn("text-sm", delivery.verified_by === "photo" ? "font-medium text-warning" : "text-muted-foreground")}>
+            {delivery.verified_by === "photo"
+              ? "Delivered without the code: checked by a photo"
+              : delivery.verified_by === "office"
+                ? "Marked delivered by the office"
+                : "Delivered with the customer's code"}
+          </p>
+          {delivery.verified_by === "photo" && (
+            <p className="text-sm text-muted-foreground">
+              {FALLBACK_TEXT[delivery.fallback_reason ?? ""] ?? "The code could not be used"}. Received by {delivery.received_by ?? "someone"}.
+            </p>
+          )}
           {delivery.proof_flag && (
             <p role="alert" className="rounded-xl border border-warning/40 bg-warning/10 p-3 text-sm text-warning">
               {FLAG_TEXT[delivery.proof_flag]}
@@ -231,6 +294,11 @@ export function DeliveryPanel({ order, onChanged }: { order: PanelOrder; onChang
           ) : delivery.proof_path ? (
             <p className="text-sm text-muted-foreground">Loading the photo…</p>
           ) : null}
+          {delivery.needs_review && (
+            <button type="button" className={btn.primary} disabled={busy} onClick={() => void run("admin_review_delivery", { p_order_id: order.id }, "Marked as checked.")}>
+              I checked the photo: all is well
+            </button>
+          )}
         </div>
       )}
 

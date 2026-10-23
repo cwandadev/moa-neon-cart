@@ -252,7 +252,7 @@ function OrderTracking() {
                     {delivery.code}
                   </p>
                   <p className="font-body text-xs text-muted-foreground">
-                    Give this code to the rider only when you have your order in your hands. They will also take a photo.
+                    Give this code to the rider only when you have your order in your hands. If you cannot give it, the rider will take a photo and the office will check it.
                   </p>
                 </>
               ) : (

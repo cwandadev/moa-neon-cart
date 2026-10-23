@@ -1,10 +1,15 @@
 /**
  * Shared bits of the delivery feature: the shapes the database functions return, links that open Google Maps and the phone,
- * a phone camera photo shrunk before it is uploaded, and the phone's location.
+ * and a phone camera photo shrunk before it is uploaded. (Finding the phone's location lives in geo.ts.)
  */
+export { getPosition, type Where } from "@/lib/geo";
 
-export type RiderItem = { name: string; variant_label: string | null; image: string; qty: number };
+export type Warehouse = { name: string; address: string; phone: string; lat: number | null; lng: number | null };
 
+/**
+ * What a rider's phone is told about a delivery. Never what is in the parcel and never a price. The customer's details are empty
+ * (null) until the parcel has been collected.
+ */
 export type RiderDelivery = {
   order_id: string;
   code: string;
@@ -15,19 +20,18 @@ export type RiderDelivery = {
   delivered_at: string | null;
   failed_reason: string | null;
   attempts_left: number;
-  customer_name: string;
-  phone: string;
-  location: string;
+  verified_by: "code" | "photo" | "office" | null;
+  warehouse: Warehouse | null;
+  customer_name: string | null;
+  phone: string | null;
+  location: string | null;
   preferred_time: string | null;
   notes: string | null;
   lat: number | null;
   lng: number | null;
-  items: RiderItem[];
 };
 
-export type AvailableOrder = { order_id: string; code: string; items: number; ready_since: string; distance_km: number | null };
-
-export type PickupPoint = { name: string; address: string; phone: string; lat: number | null; lng: number | null };
+export type AvailableOrder = { order_id: string; code: string; ready_since: string; warehouse: string | null; distance_km: number | null };
 
 export type Pin = { lat: number; lng: number; accuracy: number | null };
 
@@ -49,16 +53,35 @@ export const FAIL_REASONS: Array<[value: "no_answer" | "wrong_address" | "refuse
   ["other", "Something else"],
 ];
 
+/** When the customer cannot give the code. */
+export const FALLBACK_REASONS: Array<[value: "no_phone" | "code_not_working" | "someone_else", label: string]> = [
+  ["no_phone", "The customer has no phone or no battery"],
+  ["code_not_working", "The customer cannot find or read the code"],
+  ["someone_else", "Someone else is receiving it"],
+];
+
 export const failLabel = (reason: string | null): string =>
   reason === "cancelled" ? "The order was cancelled" : FAIL_REASONS.find(([v]) => v === reason)?.[1] ?? "Could not be delivered";
 
 // ---------- links ----------
 
-/** Opens the Google Maps app straight into navigation (or the route in the browser). Needs no key. Uses the exact pin when there is one. */
-export function navigateLink(to: { lat?: number | null | undefined; lng?: number | null | undefined; text?: string | null | undefined }): string {
-  const hasPin = typeof to.lat === "number" && typeof to.lng === "number";
-  const destination = hasPin ? `${to.lat},${to.lng}` : `${(to.text ?? "").trim()}, Kigali, Rwanda`;
-  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}&travelmode=driving&dir_action=navigate`;
+type Place = { lat?: number | null | undefined; lng?: number | null | undefined; text?: string | null | undefined };
+
+/** A pin when there is one, otherwise the address with the country added (never a city: a warehouse in Musanze is not in Kigali). */
+const place = (p: Place): string => {
+  if (typeof p.lat === "number" && typeof p.lng === "number") return `${p.lat},${p.lng}`;
+  const t = (p.text ?? "").trim();
+  return t === "" ? "Kigali, Rwanda" : /rwanda/i.test(t) ? t : `${t}, Rwanda`;
+};
+
+/** Turn-by-turn directions from wherever the rider is now. Google Maps decides the start because none is given: it opens its app straight into navigation. */
+export function navigateLink(to: Place): string {
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(place(to))}&travelmode=driving&dir_action=navigate`;
+}
+
+/** The whole trip on one map: from the warehouse to the customer. Because the start is given, Google Maps shows it as a route preview. */
+export function routeLink(from: Place, to: Place): string {
+  return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(place(from))}&destination=${encodeURIComponent(place(to))}&travelmode=driving`;
 }
 
 /** Just shows a point on the map (for the office). */
@@ -105,34 +128,3 @@ export async function shrinkPhoto(file: Blob, maxSide = 1280, quality = 0.72): P
     return file;
   }
 }
-
-// ---------- location ----------
-
-export type Where = { lat: number; lng: number; accuracy: number | null };
-
-/** The phone's location, or null when it is refused, switched off or too slow. Never throws. */
-export function getPosition(timeoutMs = 10000): Promise<Where | null> {
-  return new Promise((resolve) => {
-    if (typeof navigator === "undefined" || !navigator.geolocation) return resolve(null);
-    let settled = false;
-    const done = (v: Where | null) => {
-      if (!settled) {
-        settled = true;
-        resolve(v);
-      }
-    };
-    const timer = setTimeout(() => done(null), timeoutMs + 1000);
-    navigator.geolocation.getCurrentPosition(
-      (p) => {
-        clearTimeout(timer);
-        done({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy: Number.isFinite(p.coords.accuracy) ? Math.round(p.coords.accuracy) : null });
-      },
-      () => {
-        clearTimeout(timer);
-        done(null);
-      },
-      { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 15000 },
-    );
-  });
-}
-
