@@ -98,6 +98,34 @@ export function telLink(phone: string): string {
   return `tel:${digits}`;
 }
 
+/** Straight-line distance between two points, in kilometres. */
+export function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const r = (d: number) => (d * Math.PI) / 180;
+  const h = Math.sin(r(b.lat - a.lat) / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(r(b.lng - a.lng) / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/**
+ * A sensible order for several stops: always the nearest one next, starting from where the parcels were collected.
+ * Stops with no map pin cannot be placed, so they come last, in the order they were given. It is a straight-line guess, not a road route:
+ * it only decides which stop is shown first, and the rider can open any of them.
+ */
+export function suggestOrder<T extends { lat: number | null; lng: number | null }>(stops: T[], from: { lat: number; lng: number } | null): T[] {
+  const placed = stops.filter((s): s is T & { lat: number; lng: number } => s.lat !== null && s.lng !== null);
+  const rest = stops.filter((s) => s.lat === null || s.lng === null);
+  const out: T[] = [];
+  let here = from ?? (placed[0] ? { lat: placed[0].lat, lng: placed[0].lng } : null);
+  const left = [...placed];
+  while (left.length > 0 && here) {
+    let best = 0;
+    for (let i = 1; i < left.length; i++) if (haversineKm(here, left[i]!) < haversineKm(here, left[best]!)) best = i;
+    const [next] = left.splice(best, 1);
+    out.push(next!);
+    here = { lat: next!.lat, lng: next!.lng };
+  }
+  return [...out, ...rest];
+}
+
 export const kmLabel = (km: number | null): string | null => (km === null ? null : km < 1 ? "Under 1 km" : `About ${km} km`);
 
 // ---------- the photo ----------

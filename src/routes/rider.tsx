@@ -11,6 +11,8 @@ import {
   proofPath,
   routeLink,
   shrinkPhoto,
+  haversineKm,
+  suggestOrder,
   telLink,
   type AvailableOrder,
   type RiderDelivery,
@@ -52,7 +54,7 @@ const quiet = "min-h-11 px-3 font-body text-sm text-muted-foreground underline-o
 const alertBox = "rounded-2xl border border-destructive/40 bg-destructive/10 p-3 font-body text-sm text-destructive";
 
 function Card({ children, tone }: { children: ReactNode; tone?: "warn" | undefined }) {
-  return <li className={cn("list-none rounded-3xl border bg-card p-4 sm:p-5", tone === "warn" ? "border-warning/40" : "border-border")}>{children}</li>;
+  return <li className={cn("list-none min-w-0 rounded-3xl border bg-card p-4 sm:p-5", tone === "warn" ? "border-warning/40" : "border-border")}>{children}</li>;
 }
 
 function Message({ title, body, children }: { title: string; body?: string; children?: ReactNode }) {
@@ -222,14 +224,9 @@ function RiderApp({ name }: { name: string }) {
         ) : shown === "available" ? (
           <AvailableList orders={available} onChanged={refresh} onTook={() => setTab("mine")} />
         ) : shown === "mine" ? (
-          <ul className="grid gap-4" aria-label="My deliveries">
-            {active.length === 0 && <Empty icon="bx-package" title="Nothing on your hands" body="Take an order from Available and it shows up here." />}
-            {active.map((d) => (
-              <DeliveryCard key={d.order_id} d={d} onChanged={refresh} />
-            ))}
-          </ul>
+          <MyDeliveries active={active} onChanged={refresh} />
         ) : (
-          <ul className="grid gap-3" aria-label="Done today">
+          <ul className="grid grid-cols-[minmax(0,1fr)] gap-3" aria-label="Done today">
             {done.length === 0 && <Empty icon="bx-check-circle" title="Nothing finished yet today" body="Delivered orders show up here." />}
             {done.map((d) => (
               <DoneCard key={d.order_id} d={d} />
@@ -344,7 +341,7 @@ function AvailableList({ orders, onChanged, onTook }: { orders: AvailableOrder[]
     onTook();
   };
   return (
-    <ul className="grid gap-3" aria-label="Available orders">
+    <ul className="grid grid-cols-[minmax(0,1fr)] gap-3" aria-label="Available orders">
       {orders.length === 0 && <Empty icon="bx-time-five" title="No orders waiting" body="New paid orders appear here by themselves." />}
       {orders.map((o) => (
         <Card key={o.order_id}>
@@ -366,138 +363,404 @@ function AvailableList({ orders, onChanged, onTook }: { orders: AvailableOrder[]
   );
 }
 
-// ---------- one delivery: collect, then deliver ----------
+// ---------- my deliveries: a short queue, one decision at a time ----------
+// What a rider needs, at a glance: which parcels to collect and where, then the stops in a sensible order with the next one open.
+// Each state shows its own few things (the code and the name big, one way to get there, one way to call, one big action) and the rest hides under "More".
 
-function Step({ n, label, state }: { n: number; label: string; state: "now" | "next" | "done" }) {
+type Group = { key: string; name: string; address: string; phone: string; lat: number | null; lng: number | null; parcels: RiderDelivery[] };
+
+function groupByWarehouse(list: RiderDelivery[]): Group[] {
+  const groups = new Map<string, Group>();
+  for (const d of list) {
+    const w = d.warehouse;
+    const key = `${w?.name ?? ""}|${w?.address ?? ""}`;
+    const g = groups.get(key) ?? { key, name: w?.name ?? "The warehouse", address: w?.address ?? "", phone: w?.phone ?? "", lat: w?.lat ?? null, lng: w?.lng ?? null, parcels: [] };
+    g.parcels.push(d);
+    groups.set(key, g);
+  }
+  return [...groups.values()];
+}
+
+function MyDeliveries({ active, onChanged }: { active: RiderDelivery[]; onChanged: () => Promise<void> }) {
+  const [openId, setOpenId] = useState<string | null>(null);
+  const toCollect = active.filter((d) => d.status === "assigned");
+  const held = active.filter((d) => d.status === "picked_up").sort((a, b) => (a.picked_up_at ?? "").localeCompare(b.picked_up_at ?? ""));
+  const origin = held[0]?.warehouse && held[0].warehouse.lat !== null && held[0].warehouse.lng !== null ? { lat: held[0].warehouse.lat, lng: held[0].warehouse.lng } : null;
+  const stops = suggestOrder(held, origin);
+  const open = openId && stops.some((s) => s.order_id === openId) ? openId : stops[0]?.order_id;
+  const groups = groupByWarehouse(toCollect);
+
+  if (active.length === 0) {
+    return (
+      <ul className="grid gap-4" aria-label="My deliveries">
+        <Empty icon="bx-package" title="Nothing on your hands" body="Take an order from Available and it shows up here." />
+      </ul>
+    );
+  }
   return (
-    <span className="flex items-center gap-2 font-body text-xs">
-      <span className={cn("grid size-6 place-items-center rounded-full font-display text-xs font-semibold", state === "now" ? "bg-white text-black" : state === "done" ? "bg-success/20 text-success" : "border border-border text-muted-foreground")}>
-        {state === "done" ? "✓" : n}
-      </span>
-      <span className={state === "next" ? "text-muted-foreground" : "font-medium"}>{label}</span>
-    </span>
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-4">
+      {active.length > 1 && (
+        <p className="font-body text-sm text-muted-foreground" aria-live="polite">
+          {[stops.length > 0 && `${stops.length} to deliver`, toCollect.length > 0 && `${toCollect.length} to collect`].filter(Boolean).join(" · ")}
+        </p>
+      )}
+      <ul className="grid grid-cols-[minmax(0,1fr)] gap-3" aria-label="My deliveries">
+        {stops.map((d, i) => (
+          <DeliverStop key={d.order_id} d={d} index={i} total={stops.length} open={d.order_id === open} onOpen={() => setOpenId(d.order_id)} onChanged={onChanged} />
+        ))}
+        {groups.map((g) => (
+          <CollectGroup key={g.key} group={g} onChanged={onChanged} />
+        ))}
+      </ul>
+    </div>
   );
 }
 
-function DeliveryCard({ d, onChanged }: { d: RiderDelivery; onChanged: () => Promise<void> }) {
-  const [busy, setBusy] = useState(false);
-  const [confirmBack, setConfirmBack] = useState(false);
-  const [sheet, setSheet] = useState<null | "code" | "photo" | "fail">(null);
-  const collected = d.status === "picked_up";
-  const w = d.warehouse;
+const chip = (tone: "info" | "success" | "warning", text: string) => (
+  <span className={cn("rounded-full px-2.5 py-0.5 font-display text-[11px] font-semibold uppercase tracking-wider", tone === "info" ? "bg-info/15 text-info" : tone === "success" ? "bg-success/15 text-success" : "bg-warning/15 text-warning")}>{text}</span>
+);
 
-  const act = async (fn: "rider_mark_picked_up" | "rider_release_order", ok: string) => {
+/** The "more" things, out of the way: a few small words, never a button the rider can press by mistake while driving. */
+function More({ children }: { children: ReactNode }) {
+  const [on, setOn] = useState(false);
+  return (
+    <div className="grid gap-1">
+      <button type="button" aria-expanded={on} onClick={() => setOn((v) => !v)} className={cn(quiet, "mx-auto flex items-center gap-1")}>
+        More <i aria-hidden className={cn("bx text-lg", on ? "bx-chevron-up" : "bx-chevron-down")} />
+      </button>
+      {on && <div className="grid gap-1 rounded-2xl border border-border p-2">{children}</div>}
+    </div>
+  );
+}
+
+// ----- the route, as a line of places: where you have been, where you are going -----
+
+type Node = { state: "done" | "now" | "next"; title: ReactNode; sub?: ReactNode; extra?: ReactNode; aside?: ReactNode };
+
+const clock = (iso: string | null): string => (iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "");
+/** The straight-line distance from the warehouse to the customer, which is all a phone can say without a map service. */
+const legLabel = (d: RiderDelivery): string | null => {
+  const w = d.warehouse;
+  if (!w || w.lat === null || w.lng === null || d.lat === null || d.lng === null) return null;
+  const km = haversineKm({ lat: w.lat, lng: w.lng }, { lat: d.lat, lng: d.lng });
+  return km < 1 ? "Under 1 km" : `About ${km.toFixed(1)} km`;
+};
+
+function Timeline({ nodes }: { nodes: Node[] }) {
+  return (
+    <ol className="grid" aria-label="Route">
+      {nodes.map((n, i) => (
+        <li key={i} aria-current={n.state === "now" ? "step" : undefined} className="relative flex gap-3">
+          <span className="flex w-6 shrink-0 flex-col items-center">
+            {n.state === "done" ? (
+              <span className="grid size-6 place-items-center rounded-full bg-success/20 text-success">
+                <i aria-hidden className="bx bx-check text-lg" />
+              </span>
+            ) : n.state === "now" ? (
+              <span className="grid size-6 place-items-center rounded-full border-2 border-white">
+                <span className="size-2.5 rounded-full bg-white" />
+              </span>
+            ) : (
+              <span className="size-6 rounded-full border-2 border-dashed border-muted-foreground/50" />
+            )}
+            {i < nodes.length - 1 && <span aria-hidden className="my-1 w-0 flex-1 border-l-2 border-dashed border-border" />}
+          </span>
+          <div className={cn("min-w-0 flex-1", i < nodes.length - 1 && "pb-4")}>
+            <div className="flex items-start justify-between gap-3">
+              <p className={cn("min-w-0 font-display leading-tight", n.state === "now" ? "text-xl font-semibold" : "text-base", n.state === "next" ? "text-muted-foreground" : n.state === "done" ? "text-muted-foreground" : "")}>{n.title}</p>
+              {n.aside && <span className="shrink-0 font-body text-xs text-muted-foreground">{n.aside}</span>}
+            </div>
+            {n.sub && <p className={cn("mt-0.5 font-body text-sm text-muted-foreground", n.state === "now" && "line-clamp-2 text-base")}>{n.sub}</p>}
+            {n.extra}
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** A round call button: one thumb, no words to read. */
+const CallRound = ({ phone, who }: { phone: string; who: string }) => (
+  <a href={telLink(phone)} aria-label={`Call ${who}`} className="grid size-14 shrink-0 place-items-center rounded-2xl border border-border bg-secondary/40 hover:bg-secondary">
+    <i aria-hidden className="bx bx-phone text-2xl" />
+  </a>
+);
+
+// ----- collecting: every parcel from one warehouse, in one slide -----
+
+function CollectGroup({ group, onChanged }: { group: Group; onChanged: () => Promise<void> }) {
+  const [skipped, setSkipped] = useState<Set<string>>(new Set());
+  const [backId, setBackId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const chosen = group.parcels.filter((p) => !skipped.has(p.order_id));
+  const n = chosen.length;
+
+  const collect = async () => {
     setBusy(true);
-    const r = await call<{ ok: boolean }>(fn, { p_order_id: d.order_id });
+    let done = 0;
+    let failure = "";
+    for (const p of chosen) {
+      const r = await call<{ ok: boolean }>("rider_mark_picked_up", { p_order_id: p.order_id });
+      if (r.error) {
+        failure = r.error;
+        break;
+      }
+      done += 1;
+    }
     setBusy(false);
-    setConfirmBack(false);
-    if (r.error) toast.error(r.error);
-    else toast.success(ok);
+    if (failure) toast.error(done > 0 ? `${done} collected, then: ${failure}` : failure);
+    else toast.success(`${done === 1 ? chosen[0]!.code : `${done} parcels`} collected. Now deliver ${done === 1 ? "it" : "them"}.`);
     await onChanged();
   };
-  const finished = async () => {
-    setSheet(null);
+  const giveBack = async (p: RiderDelivery) => {
+    setBusy(true);
+    const r = await call<{ ok: boolean }>("rider_release_order", { p_order_id: p.order_id });
+    setBusy(false);
+    setBackId(null);
+    if (r.error) toast.error(r.error);
+    else toast.success(`${p.code} was given back.`);
     await onChanged();
   };
 
   return (
     <Card>
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="font-display text-2xl font-semibold tracking-tight">{d.code}</p>
-          <p className="font-body text-sm text-muted-foreground">{collected ? "On the way to the customer" : "Waiting to be collected"}</p>
-        </div>
-        <div className="flex flex-col items-end gap-1.5">
-          <Step n={1} label="Collect" state={collected ? "done" : "now"} />
-          <Step n={2} label="Deliver" state={collected ? "now" : "next"} />
-        </div>
+      <div className="flex items-center justify-between gap-3">
+        {chip("info", "Collect")}
+        <span className="font-body text-xs text-muted-foreground">
+          {group.parcels.length} parcel{group.parcels.length === 1 ? "" : "s"}
+        </span>
       </div>
 
-      {!collected ? (
-        <div className="mt-4 grid gap-4">
-          <section className="grid gap-1 rounded-2xl bg-secondary/40 p-4 font-body text-sm">
-            <p className="font-display text-xs uppercase tracking-wider text-muted-foreground">Collect at</p>
-            <p className="font-display text-base font-semibold">{w?.name ?? "The warehouse"}</p>
-            {w?.address && <p>{w.address}</p>}
-            <p className="mt-1 text-muted-foreground">
-              Ask for order <span className="font-semibold text-foreground">{d.code}</span>. Take the sealed parcel with that code on it.
-            </p>
-            <div className="mt-2 grid grid-cols-2 gap-2">
-              <a href={navigateLink({ lat: w?.lat, lng: w?.lng, text: w?.address || w?.name })} target="_blank" rel="noreferrer" className={secondary}>
-                <i aria-hidden className="bx bx-navigation text-xl" /> Navigate
-              </a>
-              {w?.phone ? (
-                <a href={telLink(w.phone)} className={secondary}>
-                  <i aria-hidden className="bx bx-phone text-xl" /> Call
-                </a>
-              ) : (
-                <span />
-              )}
-            </div>
-          </section>
-          <button type="button" disabled={busy} onClick={() => void act("rider_mark_picked_up", `${d.code} collected. Now deliver it.`)} className={primary}>
-            {busy ? "Saving…" : "I have the parcel"}
-          </button>
-          {confirmBack ? (
-            <div className="flex items-center justify-between gap-2 rounded-2xl border border-border p-3 font-body text-sm">
-              <span>Give this order back?</span>
-              <span className="flex gap-1">
-                <button type="button" className={quiet} onClick={() => setConfirmBack(false)}>
-                  No
-                </button>
-                <button type="button" disabled={busy} className={cn(quiet, "text-destructive")} onClick={() => void act("rider_release_order", `${d.code} was given back.`)}>
-                  Yes, give it back
-                </button>
-              </span>
-            </div>
-          ) : (
-            <button type="button" className={quiet} onClick={() => setConfirmBack(true)}>
-              Give this order back
-            </button>
-          )}
-        </div>
-      ) : (
-        <div className="mt-4 grid gap-4">
-          <section className="grid gap-2 rounded-2xl bg-secondary/40 p-4 font-body text-sm">
-            <p className="font-display text-xs uppercase tracking-wider text-muted-foreground">Deliver to</p>
-            <p className="font-display text-base font-semibold">{d.customer_name}</p>
-            <p>{d.location}</p>
-            {d.preferred_time && <p className="text-muted-foreground">Preferred time: {d.preferred_time}</p>}
-            {d.notes && <p className="text-muted-foreground">Note: {d.notes}</p>}
-            {d.lat === null ? (
-              <p className="rounded-xl border border-warning/40 bg-warning/10 p-2.5 text-warning">The customer did not share an exact location. Use the address, and call them when you are close.</p>
+      <div className="mt-4">
+        <Timeline
+          nodes={[
+            { state: "now", title: group.name, sub: group.address || undefined },
+            { state: "next", title: group.parcels.length === 1 ? "The customer" : "The customers", sub: "Their names and addresses appear once you have collected" },
+          ]}
+        />
+      </div>
+
+      <div className="mt-3 flex gap-2">
+        <a href={navigateLink({ lat: group.lat, lng: group.lng, text: group.address || group.name })} target="_blank" rel="noreferrer" className={cn(secondary, "min-h-14 flex-1")}>
+          <i aria-hidden className="bx bx-navigation text-xl" /> Navigate
+        </a>
+        {group.phone && <CallRound phone={group.phone} who={group.name} />}
+      </div>
+
+      <fieldset className="mt-4 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2">
+        <legend className="mb-1 font-body text-xs text-muted-foreground">Take the parcel with each of these codes</legend>
+        {group.parcels.map((p) => (
+          <label key={p.order_id} className={cn("flex min-h-14 cursor-pointer items-center gap-3 rounded-2xl border px-4 transition-colors", skipped.has(p.order_id) ? "border-border opacity-60" : "border-white/70 bg-white/5")}>
+            <input
+              type="checkbox"
+              className="size-6 accent-white"
+              checked={!skipped.has(p.order_id)}
+              onChange={() =>
+                setSkipped((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(p.order_id)) next.delete(p.order_id);
+                  else next.add(p.order_id);
+                  return next;
+                })
+              }
+            />
+            <span className="font-display text-2xl font-semibold tracking-tight">{p.code}</span>
+          </label>
+        ))}
+      </fieldset>
+
+      <div className="mt-4">
+        <SlideToConfirm label={n === 0 ? "Tick a parcel first" : `Slide: I have ${n === 1 ? "the parcel" : `${n} parcels`}`} disabled={n === 0 || busy} onConfirm={collect} />
+      </div>
+
+      <div className="mt-2">
+        <More>
+          {group.parcels.map((p) =>
+            backId === p.order_id ? (
+              <div key={p.order_id} className="flex items-center justify-between gap-2 px-2 font-body text-sm">
+                <span>Give {p.code} back?</span>
+                <span className="flex">
+                  <button type="button" className={quiet} onClick={() => setBackId(null)}>
+                    No
+                  </button>
+                  <button type="button" disabled={busy} className={cn(quiet, "text-destructive")} onClick={() => void giveBack(p)}>
+                    Yes, give it back
+                  </button>
+                </span>
+              </div>
             ) : (
-              <p className="flex items-center gap-1.5 text-success">
-                <i aria-hidden className="bx bx-map-pin text-lg" /> Exact location shared
-              </p>
-            )}
-            <div className="mt-1 grid grid-cols-2 gap-2">
-              <a href={routeLink({ lat: w?.lat, lng: w?.lng, text: w?.address || w?.name }, { lat: d.lat, lng: d.lng, text: d.location })} target="_blank" rel="noreferrer" className={secondary}>
-                <i aria-hidden className="bx bx-trip text-xl" /> Route from warehouse
-              </a>
-              <a href={navigateLink({ lat: d.lat, lng: d.lng, text: d.location })} target="_blank" rel="noreferrer" className={secondary}>
-                <i aria-hidden className="bx bx-navigation text-xl" /> Navigate from here
-              </a>
-            </div>
-            {d.phone && (
-              <a href={telLink(d.phone)} className={secondary}>
-                <i aria-hidden className="bx bx-phone text-xl" /> Call {(d.customer_name ?? "").split(" ")[0] || "the customer"}
-              </a>
-            )}
-          </section>
-          <button type="button" onClick={() => setSheet("code")} className={primary}>
-            I am here: enter the code
+              <button key={p.order_id} type="button" className={cn(quiet, "text-left")} onClick={() => setBackId(p.order_id)}>
+                Give {p.code} back
+              </button>
+            ),
+          )}
+        </More>
+      </div>
+    </Card>
+  );
+}
+
+/**
+ * Slide to confirm: the one step nobody can take back by mistake (it tells the customer their order is on the way). A tap does nothing,
+ * so a pocket or a bump cannot do it; and for anyone who cannot slide, pressing Enter on the handle does the same.
+ */
+export function SlideToConfirm({ label, disabled, onConfirm }: { label: string; disabled?: boolean | undefined; onConfirm: () => void | Promise<void> }) {
+  const HANDLE = 56;
+  const track = useRef<HTMLDivElement>(null);
+  const grab = useRef<number | null>(null);
+  const [x, setXState] = useState(0);
+  const here = useRef(0); // where the handle really is, updated at once: a fast flick can lift the finger before React has redrawn
+  const setX = (v: number) => {
+    here.current = v;
+    setXState(v);
+  };
+  const [done, setDone] = useState(false);
+  const room = () => Math.max(1, (track.current?.clientWidth || 320) - HANDLE - 8);
+
+  const finish = async () => {
+    if (disabled || done) return;
+    setDone(true);
+    setX(room());
+    try {
+      await onConfirm();
+    } finally {
+      setDone(false);
+      setX(0);
+    }
+  };
+
+  return (
+    <div ref={track} className={cn("relative h-16 select-none overflow-hidden rounded-full border border-border bg-secondary/40", disabled && "opacity-50")}>
+      <div aria-hidden className="absolute inset-y-0 left-0 rounded-full bg-primary/25" style={{ width: x + HANDLE + 4 }} />
+      <span aria-hidden className="absolute inset-0 grid place-items-center pl-14 font-display text-sm font-semibold">
+        {done ? "Saving…" : label}
+      </span>
+      <button
+        type="button"
+        aria-label={label}
+        aria-disabled={disabled || undefined}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            void finish();
+          }
+        }}
+        onPointerDown={(e) => {
+          if (disabled || done) return;
+          grab.current = e.clientX - here.current;
+          (e.currentTarget as HTMLButtonElement).setPointerCapture?.(e.pointerId);
+        }}
+        onPointerMove={(e) => {
+          if (grab.current === null) return;
+          setX(Math.max(0, Math.min(room(), e.clientX - grab.current)));
+        }}
+        onPointerUp={() => {
+          if (grab.current === null) return;
+          grab.current = null;
+          if (here.current >= room() * 0.85) void finish();
+          else setX(0);
+        }}
+        onPointerCancel={() => {
+          grab.current = null;
+          setX(0);
+        }}
+        style={{ transform: `translateX(${x}px)`, touchAction: "none", width: HANDLE, height: HANDLE }}
+        className={cn("absolute left-1 top-1 grid place-items-center rounded-full bg-primary text-primary-foreground shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", grab.current === null && "transition-transform duration-200 motion-reduce:transition-none")}
+      >
+        <i aria-hidden className="bx bx-chevrons-right text-3xl" />
+      </button>
+    </div>
+  );
+}
+
+// ----- delivering: the stops, nearest first, the next one open -----
+
+function DeliverStop({ d, index, total, open, onOpen, onChanged }: { d: RiderDelivery; index: number; total: number; open: boolean; onOpen: () => void; onChanged: () => Promise<void> }) {
+  const [sheet, setSheet] = useState<null | "code" | "photo" | "fail">(null);
+  const w = d.warehouse;
+  const finished = async () => {
+    setSheet(null);
+    await onChanged();
+  };
+
+  if (!open) {
+    return (
+      <Card>
+        <button type="button" aria-expanded={false} aria-label={`Open ${d.code}`} onClick={onOpen} className="flex w-full items-center gap-3 text-left">
+          <span className="grid size-9 shrink-0 place-items-center rounded-full border border-border font-display text-sm font-semibold">{index + 1}</span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-display text-lg font-semibold leading-tight">{d.code}</span>
+            <span className="block truncate font-body text-sm text-muted-foreground">
+              {d.customer_name}
+              {d.location ? ` · ${d.location}` : ""}
+            </span>
+          </span>
+          <i aria-hidden className="bx bx-chevron-right text-2xl text-muted-foreground" />
+        </button>
+      </Card>
+    );
+  }
+
+  const extra = [d.preferred_time, d.notes].filter(Boolean).join(" · ");
+  const dist = legLabel(d);
+  const first = (d.customer_name ?? "").split(" ")[0] || "the customer";
+  return (
+    <Card>
+      <div className="flex items-center justify-between gap-3">
+        {chip("success", "Deliver")}
+        <span className="font-body text-xs text-muted-foreground">{index === 0 ? "Next stop" : `Stop ${index + 1} of ${total}`}</span>
+      </div>
+      <div className="mt-2 flex items-end justify-between gap-3">
+        <p className="font-display text-4xl font-semibold leading-none tracking-tight">{d.code}</p>
+        {dist && <span className="shrink-0 rounded-full bg-secondary px-3 py-1 font-body text-xs">{dist}</span>}
+      </div>
+
+      <div className="mt-4">
+        <Timeline
+          nodes={[
+            { state: "done", title: `Collected at ${w?.name ?? "the warehouse"}`, aside: clock(d.picked_up_at) || undefined },
+            {
+              state: "now",
+              title: d.customer_name,
+              sub: d.location,
+              extra: (
+                <>
+                  {extra && <p className="mt-1 font-body text-sm text-muted-foreground">{extra}</p>}
+                  {d.lat === null && (
+                    <p className="mt-1.5 flex items-center gap-1.5 font-body text-sm text-warning">
+                      <i aria-hidden className="bx bx-error text-lg" /> No exact location: call them when you are close
+                    </p>
+                  )}
+                </>
+              ),
+            },
+          ]}
+        />
+      </div>
+
+      <div className="mt-3 flex gap-2">
+        <a href={navigateLink({ lat: d.lat, lng: d.lng, text: d.location })} target="_blank" rel="noreferrer" className={cn(secondary, "min-h-14 flex-1")}>
+          <i aria-hidden className="bx bx-navigation text-xl" /> Navigate
+        </a>
+        {d.phone && <CallRound phone={d.phone} who={first} />}
+      </div>
+      <button type="button" onClick={() => setSheet("code")} className={cn(primary, "mt-3")}>
+        I am here: enter the code
+      </button>
+
+      <div className="mt-1">
+        <More>
+          <button type="button" className={cn(quiet, "text-left")} onClick={() => setSheet("photo")}>
+            The customer can&apos;t give the code
           </button>
-          <div className="flex flex-wrap items-center justify-center gap-x-2">
-            <button type="button" className={quiet} onClick={() => setSheet("photo")}>
-              The customer can&apos;t give the code
-            </button>
-            <button type="button" className={quiet} onClick={() => setSheet("fail")}>
-              I can&apos;t deliver this order
-            </button>
-          </div>
-        </div>
-      )}
+          <a href={routeLink({ lat: w?.lat, lng: w?.lng, text: w?.address || w?.name }, { lat: d.lat, lng: d.lng, text: d.location })} target="_blank" rel="noreferrer" className={cn(quiet, "flex items-center")}>
+            Show the whole route from the warehouse
+          </a>
+          <button type="button" className={cn(quiet, "text-left")} onClick={() => setSheet("fail")}>
+            I can&apos;t deliver this order
+          </button>
+        </More>
+      </div>
 
       {sheet === "code" && <CodeSheet d={d} office={w?.phone ?? ""} onClose={() => setSheet(null)} onDone={finished} onNoCode={() => setSheet("photo")} />}
       {sheet === "photo" && <NoCodeSheet d={d} onClose={() => setSheet(null)} onDone={finished} />}
@@ -600,7 +863,7 @@ function CodeSheet({ d, office, onClose, onDone, onNoCode }: { d: RiderDelivery;
   };
 
   return (
-    <Sheet title={`Deliver ${d.code}`} subtitle={d.customer_name ?? undefined} onClose={onClose}>
+    <Sheet title={`Deliver ${d.code}`} subtitle={[d.customer_name, d.location].filter(Boolean).join(" · ") || undefined} onClose={onClose}>
       {locked ? (
         <div className="grid gap-4">
           <p role="alert" className={alertBox}>
@@ -638,7 +901,7 @@ function CodeSheet({ d, office, onClose, onDone, onNoCode }: { d: RiderDelivery;
               className="h-24 rounded-2xl border border-border bg-card text-center font-display text-6xl font-semibold tracking-[0.35em] placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-ring"
             />
             <p id="rider-code-help" className="font-body text-xs text-muted-foreground">
-              They see it on their order page in the MOA Mart app. Never tell them the code.{attemptsLeft < 5 ? ` ${attemptsLeft} ${attemptsLeft === 1 ? "try" : "tries"} left.` : ""}
+              Never tell them the code.{attemptsLeft < 5 ? ` ${attemptsLeft} ${attemptsLeft === 1 ? "try" : "tries"} left.` : ""}
             </p>
           </section>
           {error && (

@@ -428,7 +428,7 @@ function WarehouseSheet({ warehouse, onClose, onSaved }: { warehouse: Warehouse 
           </button>
         </div>
       </div>
-      {map && <MapPicker title={`Where is ${f.name.trim() || "the warehouse"}?`} initial={lat !== null && lng !== null && !badPin ? { lat, lng } : null} onClose={() => setMap(false)} onPick={(p) => { setPin(p); setMap(false); }} />}
+      {map && <MapPicker title={`Where is ${f.name.trim() || "the warehouse"}?`} initial={lat !== null && lng !== null && !badPin ? { lat, lng } : null} onClose={() => setMap(false)} onPick={(p) => { setPin(p); if (p.label && f.address.trim() === "") setF((x) => ({ ...x, address: p.label ?? "" })); setMap(false); }} />}
     </AdminSheet>
   );
 }

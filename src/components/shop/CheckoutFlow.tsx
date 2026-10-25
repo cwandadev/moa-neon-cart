@@ -51,6 +51,27 @@ export function CheckoutFlow({
   const [error, setError] = useState("");
   const [showItems, setShowItems] = useState(false);
   const [pin, setPin] = useState<Pin | null>(null);
+  // The place chosen on the map (or found by the phone) is also written into the address box, unless the customer typed their own:
+  // then it is offered as a suggestion instead of replacing what they wrote.
+  const formNow = useRef(form);
+  formNow.current = form;
+  const autoPlace = useRef<string | null>(null);
+  const [suggested, setSuggested] = useState<string | null>(null);
+  const onPin = (p: Pin | null, place?: string | null) => {
+    setPin(p);
+    const typed = formNow.current.location.trim();
+    if (!p) {
+      setSuggested(null);
+      if (autoPlace.current && typed === autoPlace.current) setForm({ ...formNow.current, location: "" });
+      autoPlace.current = null;
+    } else if (place) {
+      if (typed === "" || typed === autoPlace.current) {
+        autoPlace.current = place;
+        setSuggested(null);
+        setForm({ ...formNow.current, location: place });
+      } else if (typed !== place) setSuggested(place);
+    }
+  };
   const [paid, setPaid] = useState(false);
   const [ended, setEnded] = useState(false);
   const { ensureSession, user } = useAuth();
@@ -332,6 +353,12 @@ export function CheckoutFlow({
                   autoComplete="tel"
                   className={field}
                 />
+                <p className="flex items-start gap-2 rounded-lg bg-primary/10 px-3 py-2 font-body text-xs text-foreground">
+                  <i aria-hidden className="bx bx-phone-call mt-px text-base text-primary" />
+                  <span>
+                    <strong className="font-semibold">The rider will call this number</strong> when they reach you, so keep your phone on and nearby.
+                  </span>
+                </p>
                 <button
                   type="button"
                   onClick={() => setUseOther((v) => !v)}
@@ -341,7 +368,7 @@ export function CheckoutFlow({
                 </button>
                 {useOther && (
                   <div className="grid gap-2 pt-1">
-                    <Label htmlFor="co-momo">Phone number</Label>
+                    <Label htmlFor="co-momo">Mobile Money number (for the payment only)</Label>
                     <div className="flex gap-2">
                       <span className="grid h-11 place-items-center rounded-xl border border-border bg-muted/40 px-3 font-body text-sm text-muted-foreground sm:h-10">
                         +250
@@ -372,10 +399,21 @@ export function CheckoutFlow({
                   autoComplete="street-address"
                   className={field}
                 />
-                <LocationPinButton value={pin} onChange={setPin} />
-                <p className="font-body text-xs text-muted-foreground">
-                  Sharing your exact location helps the rider find you. We call your phone number if we need directions.
-                </p>
+                {suggested && suggested !== form.location.trim() && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      autoPlace.current = suggested;
+                      setForm({ ...form, location: suggested });
+                      setSuggested(null);
+                    }}
+                    className="w-fit text-left font-body text-xs text-primary hover:underline"
+                  >
+                    Use &ldquo;{suggested}&rdquo; as the address
+                  </button>
+                )}
+                <LocationPinButton value={pin} onChange={onPin} />
+                <p className="font-body text-xs text-muted-foreground">Sharing your exact location helps the rider find you.</p>
               </div>
             </section>
           </div>
