@@ -55,7 +55,7 @@ interface SheetContentProps
     React.ComponentPropsWithoutRef<typeof SheetPrimitive.Content>,
     VariantProps<typeof sheetVariants> {
   /** A sheet from the bottom, on a phone: "auto" opens partway (and can be opened fully), "full" opens full screen (for forms). */
-  snap?: "auto" | "full" | undefined;
+  snap?: "auto" | "full" | "fit" | undefined;
 }
 
 const SheetContent = React.forwardRef<
@@ -63,7 +63,9 @@ const SheetContent = React.forwardRef<
   SheetContentProps
 >(({ side = "right", className, children, snap = "auto", ...props }, ref) => {
   const bottom = side === "bottom";
-  const fullOnly = snap === "full";
+  // "fit": as tall as its content (up to the whole screen), for a form whose Pay button should sit right under the form, with no gap.
+  const fit = snap === "fit";
+  const fullOnly = snap === "full" || fit;
   const phone = usePhoneViewport();
   const panelRef = React.useRef<HTMLDivElement | null>(null);
   // The panel only exists while the sheet is open. Knowing when it appears lets the swiping start then.
@@ -121,9 +123,11 @@ const SheetContent = React.forwardRef<
         className={cn(
           sheetVariants({ side }),
           bottom &&
-            (fullOnly
-              ? "max-md:h-[100dvh] max-md:max-h-[100dvh] max-md:rounded-none"
-              : expanded
+            (fit
+              ? "max-md:max-h-[100dvh]"
+              : fullOnly
+                ? "max-md:h-[100dvh] max-md:max-h-[100dvh] max-md:rounded-none"
+                : expanded
                 ? "max-md:max-h-[100dvh] max-md:rounded-t-none"
                 : "max-md:max-h-[72dvh]"),
           bottom && "max-md:transition-[transform,max-height]",
