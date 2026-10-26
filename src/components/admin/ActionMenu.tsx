@@ -20,13 +20,16 @@ export function ActionMenu({ items, label, up = false, children }: { items: Menu
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const id = useId();
 
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
       const t = e.target as Node;
-      if (menuRef.current?.contains(t) || triggerRef.current?.contains(t)) return;
+      // Everything inside this component counts as inside: on a phone the menu is a sheet, not the little popup, and a tap on one of its rows
+      // sends a mouse-down first. Closing on that would remove the row before the tap on it registered.
+      if (rootRef.current?.contains(t)) return;
       setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
@@ -58,7 +61,7 @@ export function ActionMenu({ items, label, up = false, children }: { items: Menu
   };
 
   return (
-    <div className="relative">
+    <div ref={rootRef} className="relative">
       <button
         ref={triggerRef}
         type="button"

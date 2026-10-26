@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { LocationPinButton } from "@/components/shop/LocationPinButton";
 import { PaymentPanel } from "@/components/shop/PaymentPanel";
@@ -85,6 +85,8 @@ function OrderTracking() {
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState("");
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const navigate = useNavigate();
   const [delivery, setDelivery] = useState<CustomerDelivery | null>(null);
 
   const load = useCallback(async () => {
@@ -152,6 +154,21 @@ function OrderTracking() {
     }
     setConfirmCancel(false);
     await load();
+  };
+
+  // Takes a finished order off the customer's own list. MOA Mart keeps its records; only this list is tidied.
+  const removeIt = async () => {
+    if (!order) return;
+    setBusy(true);
+    setActionError("");
+    const { error } = await supabase.rpc("hide_my_order", { p_code: order.code });
+    setBusy(false);
+    setConfirmRemove(false);
+    if (error) {
+      setActionError(error.message);
+      return;
+    }
+    void navigate({ to: "/orders" });
   };
 
   if (loading) {
@@ -346,10 +363,39 @@ function OrderTracking() {
           </dl>
         </section>
 
+        {(order.fulfilment_status === "delivered" || cancelled) && order.refund_status !== "pending" && (
+          <div className="mt-6 text-center">
+            <button type="button" onClick={() => setConfirmRemove(true)} className="font-body text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground">
+              Remove this order from my list
+            </button>
+          </div>
+        )}
+
         <p className="mt-6 text-center font-body text-xs text-muted-foreground">
           Questions about this order? Use the chat button and quote {order.code}.
         </p>
       </main>
+
+      <AlertDialog open={confirmRemove} onOpenChange={setConfirmRemove}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove this order from your list?</AlertDialogTitle>
+            <AlertDialogDescription>It will no longer show in My orders. MOA Mart keeps its records, so we can still help you with it if you ask.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep it</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={busy}
+              onClick={(e) => {
+                e.preventDefault();
+                void removeIt();
+              }}
+            >
+              {busy ? "Removing…" : "Remove it"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={confirmCancel} onOpenChange={setConfirmCancel}>
         <AlertDialogContent>

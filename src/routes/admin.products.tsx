@@ -75,6 +75,8 @@ type Variant = {
   sku: string;
   price: string;
   stock: string;
+  /** The starting stock in each warehouse, when there is more than one (their total is kept in `stock`). */
+  wh?: Record<string, string>;
   image: string;
   swatch: string;
 };
@@ -389,6 +391,23 @@ function ProductEditor({
       swatch: v.swatch ?? "",
     })), { sync: true });
 
+  // Where the stock starts: with more than one warehouse, the starting stock is given warehouse by warehouse.
+  const [warehouses, setWarehouses] = useState<Array<{ id: string; name: string; is_default: boolean }>>([]);
+  const [whStock, setWhStock] = useState<Record<string, string>>({});
+  useEffect(() => {
+    void (async () => {
+      try {
+        const { data, error } = await supabase.from("warehouses").select("id, name, is_default").eq("active", true).is("archived_at", null).order("name");
+        if (!error && data) setWarehouses([...(data as Array<{ id: string; name: string; is_default: boolean }>)].sort((a, b) => Number(b.is_default) - Number(a.is_default) || a.name.localeCompare(b.name)));
+      } catch {
+        /* an older database has no warehouses: the form is the one it always was */
+      }
+    })();
+  }, []);
+  const multi = warehouses.length > 1;
+  const digits = (v: string) => v.replace(/[^\d]/g, "").slice(0, 6);
+  const whTotal = warehouses.reduce((n, w) => n + (Number(whStock[w.id]) || 0), 0);
+
   // Keep one row per combination, and keep what was typed for combinations that stay.
   useEffect(() => {
     if (!hasOptions) return;
@@ -472,7 +491,7 @@ function ProductEditor({
       price: num(form.price),
       oldPrice: num(form.oldPrice),
       cost: num(form.cost),
-      stock: hasOptions ? 0 : num(form.stock),
+      stock: hasOptions ? 0 : multi && !product ? whTotal : num(form.stock),
       images: form.images,
       blurb: form.blurb,
       description: form.description,
@@ -483,6 +502,7 @@ function ProductEditor({
         .filter(Boolean),
     });
     const errs: Errors = {};
+    if (multi && !product && !hasOptions && warehouses.some((w) => whStock[w.id] !== undefined && whStock[w.id] !== "" && !/^\d+$/.test(whStock[w.id]!))) errs.stock = "Enter a whole number in every warehouse, 0 or more.";
     if (!r.success) {
       for (const i of r.error.issues) {
         const k = i.path[0] as keyof Form;
@@ -587,7 +607,7 @@ function ProductEditor({
           price: d.price,
           old_price: d.oldPrice ?? null,
           sku: productSku,
-          stock: d.stock,
+          stock: multi ? 0 : d.stock,        // with several warehouses the stock is set warehouse by warehouse, just after
           images: d.images,
           blurb: d.blurb,
           description: d.description,
@@ -644,9 +664,21 @@ function ProductEditor({
         const fresh = variants
           .map((v, i) => ({ v, i }))
           .filter((x) => !x.v.id)
-          .map((x) => ({ product_id: id, ...toDb(x.v, x.i), stock: Number(x.v.stock) }));
+          .map((x) => ({ product_id: id, ...toDb(x.v, x.i), stock: multi ? 0 : Number(x.v.stock) }));
         if (fresh.length > 0) {
           const { error } = await supabase.from("product_variants").insert(fresh);
+          if (error) throw error;
+        }
+      }
+
+      // Opening stock, in each warehouse (and for each new option), in one go.
+      if (multi) {
+        const payload = {
+          stock: !hasOptions && !product ? Object.fromEntries(warehouses.map((w) => [w.id, Number(whStock[w.id]) || 0])) : {},
+          variants: hasOptions ? variants.filter((v) => !v.id).map((v) => ({ option1: v.option1 || null, option2: v.option2 || null, stock: Object.fromEntries(warehouses.map((w) => [w.id, Number(v.wh?.[w.id]) || 0])) })) : [],
+        };
+        if (Object.values(payload.stock).some((n) => n > 0) || payload.variants.some((x) => Object.values(x.stock).some((n) => n > 0))) {
+          const { error } = await supabase.rpc("apply_initial_stock", { p_product: id, p_payload: payload });
           if (error) throw error;
         }
       }
@@ -722,9 +754,22 @@ function ProductEditor({
             </Field>
           </div>
           <p className="-mt-1 text-sm text-muted-foreground">The cost is only visible to admins and is used for finance.</p>
-          {!product && !hasOptions && (
+          {!product && !hasOptions && !multi && (
             <Field label="Starting stock" error={errors.stock}>
               <input value={form.stock} onChange={set("stock")} inputMode="numeric" className={field} />
+            </Field>
+          )}
+          {!product && !hasOptions && multi && (
+            <Field label="Starting stock in each warehouse" error={errors.stock}>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {warehouses.map((w) => (
+                  <label key={w.id} className="grid gap-1.5 text-sm">
+                    <span className="text-muted-foreground">{w.name}</span>
+                    <input aria-label={`Starting stock in ${w.name}`} value={whStock[w.id] ?? "0"} onChange={(e) => setWhStock((s) => ({ ...s, [w.id]: digits(e.target.value) }))} inputMode="numeric" className={field} />
+                  </label>
+                ))}
+              </div>
+              <p className="mt-2 text-sm text-muted-foreground">{whTotal} in all warehouses. A warehouse that does not have it can be left at 0.</p>
             </Field>
           )}
         </Section>
@@ -863,9 +908,31 @@ function ProductEditor({
                               <p className="text-sm text-muted-foreground">Change it on the Inventory page.</p>
                             </div>
                           ) : (
-                            <Field label="Stock">
-                              <input value={v.stock} onChange={(e) => setVariant(i, { stock: e.target.value })} inputMode="numeric" className={field} />
-                            </Field>
+                            multi ? (
+                              <Field label="Starting stock in each warehouse">
+                                <div className="grid gap-3 sm:grid-cols-2">
+                                  {warehouses.map((w) => (
+                                    <label key={w.id} className="grid gap-1.5 text-sm">
+                                      <span className="text-muted-foreground">{w.name}</span>
+                                      <input
+                                        aria-label={`Stock of ${label} in ${w.name}`}
+                                        value={v.wh?.[w.id] ?? "0"}
+                                        onChange={(e) => {
+                                          const wh = { ...(v.wh ?? {}), [w.id]: digits(e.target.value) };
+                                          setVariant(i, { wh, stock: String(warehouses.reduce((n, x) => n + (Number(wh[x.id]) || 0), 0)) });
+                                        }}
+                                        inputMode="numeric"
+                                        className={field}
+                                      />
+                                    </label>
+                                  ))}
+                                </div>
+                              </Field>
+                            ) : (
+                              <Field label="Stock">
+                                <input value={v.stock} onChange={(e) => setVariant(i, { stock: e.target.value })} inputMode="numeric" className={field} />
+                              </Field>
+                            )
                           )}
                           <Field label="Price (optional)">
                             <input value={v.price} onChange={(e) => setVariant(i, { price: e.target.value })} inputMode="numeric" placeholder={form.price || "same as the product"} className={field} />

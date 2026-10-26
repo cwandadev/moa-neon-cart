@@ -29,6 +29,16 @@ type DeliveryRow = {
 type EventRow = { id: string; event: string; detail: Record<string, unknown> | null; created_at: string; actor: Person };
 type RiderOption = { id: string; first_name: string; last_name: string };
 type WarehouseOption = { id: string; name: string; address: string };
+/** Goods for this order that are in another warehouse and must be moved to the one it is filled from. */
+type Transfer = {
+  id: string;
+  qty: number;
+  status: "requested" | "received" | "cancelled";
+  from_warehouse: string;
+  to_warehouse: string;
+  products: { name: string } | null;
+  product_variants: { option1: string | null; option2: string | null } | null;
+};
 
 export type PanelOrder = { id: string; code: string; fulfilment_status: string; lat: number | null; lng: number | null; warehouse_id?: string | null };
 
@@ -90,6 +100,7 @@ export function DeliveryPanel({ order, onChanged }: { order: PanelOrder; onChang
   const [events, setEvents] = useState<EventRow[]>([]);
   const [riders, setRiders] = useState<RiderOption[]>([]);
   const [warehouses, setWarehouses] = useState<WarehouseOption[]>([]);
+  const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [pick, setPick] = useState("");
@@ -100,7 +111,7 @@ export function DeliveryPanel({ order, onChanged }: { order: PanelOrder; onChang
   const [reason, setReason] = useState("");
 
   const load = useCallback(async () => {
-    const [d, e, r, w] = await Promise.all([
+    const [d, e, r, w, t] = await Promise.all([
       supabase
         .from("deliveries")
         .select(
@@ -115,11 +126,14 @@ export function DeliveryPanel({ order, onChanged }: { order: PanelOrder; onChang
         .order("created_at", { ascending: true }),
       supabase.from("profiles").select("id, first_name, last_name").eq("role", "rider").order("first_name"),
       supabase.from("warehouses").select("id, name, address").eq("active", true).order("name"),
+      // Needs migration 000023: without it there is simply nothing to show here.
+      supabase.from("stock_transfers").select("id, qty, status, from_warehouse, to_warehouse, products(name), product_variants(option1, option2)").eq("order_id", order.id).order("created_at", { ascending: true }),
     ]);
     setDelivery((d.data as unknown as DeliveryRow | null) ?? null);
     setEvents(((e.data as unknown as EventRow[] | null) ?? []).slice(-30));
     setRiders((r.data as RiderOption[] | null) ?? []);
     setWarehouses((w.data as WarehouseOption[] | null) ?? []);
+    setTransfers(t.error ? [] : ((t.data as unknown as Transfer[] | null) ?? []));
     setLoaded(true);
   }, [order.id]);
 
@@ -165,6 +179,8 @@ export function DeliveryPanel({ order, onChanged }: { order: PanelOrder; onChang
   };
 
   const status = order.fulfilment_status;
+  const waiting = transfers.filter((t) => t.status === "requested");
+  const warehouseName = (id: string) => warehouses.find((w) => w.id === id)?.name ?? "the other warehouse";
   if (!["confirmed", "out_for_delivery", "delivered"].includes(status) && !delivery) return null;
   if (!loaded) return <section aria-label="Delivery" className="mt-6 h-24 animate-pulse rounded-2xl border border-[#262626] bg-white/[0.03]" />;
 
@@ -191,6 +207,33 @@ export function DeliveryPanel({ order, onChanged }: { order: PanelOrder; onChang
         <h3 className="font-display text-sm font-medium">Delivery</h3>
         <span className={cn("text-sm font-medium", tone)}>{label}</span>
       </div>
+
+      {waiting.length > 0 && (
+        <div role="status" className="grid gap-3 rounded-2xl border border-warning/40 bg-warning/10 p-4 text-sm">
+          <div>
+            <p className="font-medium text-warning">Waiting for items</p>
+            <p className="mt-1 text-muted-foreground">
+              {waiting.length === 1 ? "This item is" : "These items are"} in another warehouse. Move {waiting.length === 1 ? "it" : "them"} to {warehouseName(waiting[0]!.to_warehouse)}, then mark {waiting.length === 1 ? "it" : "them"} received. The order cannot go to a rider until then.
+            </p>
+          </div>
+          <ul className="grid gap-2" aria-label="Items to move">
+            {waiting.map((t) => (
+              <li key={t.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-black/30 px-3 py-2">
+                <span className="min-w-0">
+                  <span className="font-medium">
+                    {t.qty} × {t.products?.name ?? "An item"}
+                    {t.product_variants ? ` (${[t.product_variants.option1, t.product_variants.option2].filter(Boolean).join(" / ")})` : ""}
+                  </span>
+                  <span className="block text-xs text-muted-foreground">from {warehouseName(t.from_warehouse)}</span>
+                </span>
+                <button type="button" className={btn.ghost} disabled={busy} onClick={() => void run("receive_transfer", { p_id: t.id }, "Marked as received.")}>
+                  It has arrived
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {(here || canMoveWarehouse) && warehouses.length > 0 && (
         <div className="grid gap-2 text-sm">
