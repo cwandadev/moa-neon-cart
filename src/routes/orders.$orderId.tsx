@@ -372,7 +372,11 @@ function OrderTracking() {
         )}
 
         <p className="mt-6 text-center font-body text-xs text-muted-foreground">
-          Questions about this order? Use the chat button and quote {order.code}.
+          Questions about this order? Use the chat button and quote {order.code}, or read the{" "}
+          <Link to="/help" className="underline underline-offset-4 hover:text-foreground">
+            help guide
+          </Link>
+          .
         </p>
       </main>
 

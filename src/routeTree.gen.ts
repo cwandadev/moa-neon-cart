@@ -15,6 +15,7 @@ import { Route as AdminRouteImport } from './routes/admin'
 import { Route as ContactRouteImport } from './routes/contact'
 import { Route as DeliveryRouteImport } from './routes/delivery'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
+import { Route as HelpRouteImport } from './routes/help'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as PrivacyPolicyRouteImport } from './routes/privacy-policy'
@@ -28,6 +29,7 @@ import { Route as WishlistRouteImport } from './routes/wishlist'
 import { Route as AdminIndexRouteImport } from './routes/admin.index'
 import { Route as AdminAnalyticsRouteImport } from './routes/admin.analytics'
 import { Route as AdminFinanceRouteImport } from './routes/admin.finance'
+import { Route as AdminHelpRouteImport } from './routes/admin.help'
 import { Route as AdminInboxRouteImport } from './routes/admin.inbox'
 import { Route as AdminInventoryRouteImport } from './routes/admin.inventory'
 import { Route as AdminNotificationsRouteImport } from './routes/admin.notifications'
@@ -68,6 +70,11 @@ const DeliveryRoute = DeliveryRouteImport.update({
 const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
   id: '/forgot-password',
   path: '/forgot-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HelpRoute = HelpRouteImport.update({
+  id: '/help',
+  path: '/help',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -135,6 +142,11 @@ const AdminFinanceRoute = AdminFinanceRouteImport.update({
   path: '/finance',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminHelpRoute = AdminHelpRouteImport.update({
+  id: '/help',
+  path: '/help',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminInboxRoute = AdminInboxRouteImport.update({
   id: '/inbox',
   path: '/inbox',
@@ -198,6 +210,7 @@ export interface FileRoutesByFullPath {
   '/contact': typeof ContactRoute
   '/delivery': typeof DeliveryRoute
   '/forgot-password': typeof ForgotPasswordRoute
+  '/help': typeof HelpRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
   '/privacy-policy': typeof PrivacyPolicyRoute
@@ -210,6 +223,7 @@ export interface FileRoutesByFullPath {
   '/wishlist': typeof WishlistRoute
   '/admin/analytics': typeof AdminAnalyticsRoute
   '/admin/finance': typeof AdminFinanceRoute
+  '/admin/help': typeof AdminHelpRoute
   '/admin/inbox': typeof AdminInboxRoute
   '/admin/inventory': typeof AdminInventoryRoute
   '/admin/notifications': typeof AdminNotificationsRoute
@@ -229,6 +243,7 @@ export interface FileRoutesByTo {
   '/contact': typeof ContactRoute
   '/delivery': typeof DeliveryRoute
   '/forgot-password': typeof ForgotPasswordRoute
+  '/help': typeof HelpRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
   '/privacy-policy': typeof PrivacyPolicyRoute
@@ -241,6 +256,7 @@ export interface FileRoutesByTo {
   '/wishlist': typeof WishlistRoute
   '/admin/analytics': typeof AdminAnalyticsRoute
   '/admin/finance': typeof AdminFinanceRoute
+  '/admin/help': typeof AdminHelpRoute
   '/admin/inbox': typeof AdminInboxRoute
   '/admin/inventory': typeof AdminInventoryRoute
   '/admin/notifications': typeof AdminNotificationsRoute
@@ -262,6 +278,7 @@ export interface FileRoutesById {
   '/contact': typeof ContactRoute
   '/delivery': typeof DeliveryRoute
   '/forgot-password': typeof ForgotPasswordRoute
+  '/help': typeof HelpRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
   '/privacy-policy': typeof PrivacyPolicyRoute
@@ -274,6 +291,7 @@ export interface FileRoutesById {
   '/wishlist': typeof WishlistRoute
   '/admin/analytics': typeof AdminAnalyticsRoute
   '/admin/finance': typeof AdminFinanceRoute
+  '/admin/help': typeof AdminHelpRoute
   '/admin/inbox': typeof AdminInboxRoute
   '/admin/inventory': typeof AdminInventoryRoute
   '/admin/notifications': typeof AdminNotificationsRoute
@@ -296,6 +314,7 @@ export interface FileRouteTypes {
     | '/contact'
     | '/delivery'
     | '/forgot-password'
+    | '/help'
     | '/login'
     | '/notifications'
     | '/privacy-policy'
@@ -308,6 +327,7 @@ export interface FileRouteTypes {
     | '/wishlist'
     | '/admin/analytics'
     | '/admin/finance'
+    | '/admin/help'
     | '/admin/inbox'
     | '/admin/inventory'
     | '/admin/notifications'
@@ -327,6 +347,7 @@ export interface FileRouteTypes {
     | '/contact'
     | '/delivery'
     | '/forgot-password'
+    | '/help'
     | '/login'
     | '/notifications'
     | '/privacy-policy'
@@ -339,6 +360,7 @@ export interface FileRouteTypes {
     | '/wishlist'
     | '/admin/analytics'
     | '/admin/finance'
+    | '/admin/help'
     | '/admin/inbox'
     | '/admin/inventory'
     | '/admin/notifications'
@@ -359,6 +381,7 @@ export interface FileRouteTypes {
     | '/contact'
     | '/delivery'
     | '/forgot-password'
+    | '/help'
     | '/login'
     | '/notifications'
     | '/privacy-policy'
@@ -371,6 +394,7 @@ export interface FileRouteTypes {
     | '/wishlist'
     | '/admin/analytics'
     | '/admin/finance'
+    | '/admin/help'
     | '/admin/inbox'
     | '/admin/inventory'
     | '/admin/notifications'
@@ -392,6 +416,7 @@ export interface RootRouteChildren {
   ContactRoute: typeof ContactRoute
   DeliveryRoute: typeof DeliveryRoute
   ForgotPasswordRoute: typeof ForgotPasswordRoute
+  HelpRoute: typeof HelpRoute
   LoginRoute: typeof LoginRoute
   NotificationsRoute: typeof NotificationsRoute
   PrivacyPolicyRoute: typeof PrivacyPolicyRoute
@@ -450,6 +475,13 @@ declare module '@tanstack/react-router' {
       path: '/forgot-password'
       fullPath: '/forgot-password'
       preLoaderRoute: typeof ForgotPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/help': {
+      id: '/help'
+      path: '/help'
+      fullPath: '/help'
+      preLoaderRoute: typeof HelpRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -543,6 +575,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminFinanceRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/help': {
+      id: '/admin/help'
+      path: '/help'
+      fullPath: '/admin/help'
+      preLoaderRoute: typeof AdminHelpRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/inbox': {
       id: '/admin/inbox'
       path: '/inbox'
@@ -626,6 +665,7 @@ declare module '@tanstack/react-router' {
 interface AdminRouteChildren {
   AdminAnalyticsRoute: typeof AdminAnalyticsRoute
   AdminFinanceRoute: typeof AdminFinanceRoute
+  AdminHelpRoute: typeof AdminHelpRoute
   AdminInboxRoute: typeof AdminInboxRoute
   AdminInventoryRoute: typeof AdminInventoryRoute
   AdminNotificationsRoute: typeof AdminNotificationsRoute
@@ -639,6 +679,7 @@ interface AdminRouteChildren {
 const AdminRouteChildren: AdminRouteChildren = {
   AdminAnalyticsRoute: AdminAnalyticsRoute,
   AdminFinanceRoute: AdminFinanceRoute,
+  AdminHelpRoute: AdminHelpRoute,
   AdminInboxRoute: AdminInboxRoute,
   AdminInventoryRoute: AdminInventoryRoute,
   AdminNotificationsRoute: AdminNotificationsRoute,
@@ -658,6 +699,7 @@ const rootRouteChildren: RootRouteChildren = {
   ContactRoute: ContactRoute,
   DeliveryRoute: DeliveryRoute,
   ForgotPasswordRoute: ForgotPasswordRoute,
+  HelpRoute: HelpRoute,
   LoginRoute: LoginRoute,
   NotificationsRoute: NotificationsRoute,
   PrivacyPolicyRoute: PrivacyPolicyRoute,
