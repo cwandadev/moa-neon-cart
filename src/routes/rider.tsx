@@ -18,6 +18,8 @@ import {
   type RiderDelivery,
 } from "@/lib/delivery";
 import { GEO_HELP, locate } from "@/lib/geo";
+import { HelpCenter } from "@/components/help/HelpCenter";
+import { RIDER_GUIDE } from "@/lib/help";
 import { markAllRead, markRead, SEV, timeAgo, useNotifications } from "@/lib/notifications";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -118,6 +120,7 @@ function RiderApp({ name }: { name: string }) {
   const [online, setOnline] = useState(false);
   const [offer, setOffer] = useState<Offer | null>(null);
   const [onlineBusy, setOnlineBusy] = useState(false);
+  const [help, setHelp] = useState(false);
   const [locNote, setLocNote] = useState("");
   const [, tick] = useState(0);
   const alive = useRef(true);
@@ -284,6 +287,9 @@ function RiderApp({ name }: { name: string }) {
               {onlineBusy ? "…" : online ? "Online" : "Offline"}
             </button>
           )}
+          <button type="button" onClick={() => setHelp(true)} aria-label="Help" className="grid size-11 place-items-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground">
+            <i aria-hidden className="bx bx-help-circle text-2xl" />
+          </button>
           <button type="button" onClick={() => void refresh()} aria-label="Refresh" className="grid size-11 place-items-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground">
             <i aria-hidden className={cn("bx bx-refresh text-2xl", refreshing && "animate-spin")} />
           </button>
@@ -292,6 +298,8 @@ function RiderApp({ name }: { name: string }) {
           </button>
         </div>
       </header>
+
+      {help && <RiderHelp onClose={() => setHelp(false)} />}
 
       <main className="mx-auto max-w-xl px-4 pt-4">
         {loadError && (
@@ -345,6 +353,42 @@ function RiderApp({ name }: { name: string }) {
           ))}
         </div>
       </nav>
+    </div>
+  );
+}
+
+/** The rider guide, over the whole screen. Escape or the close button brings the rider back to exactly where they were. */
+function RiderHelp({ onClose }: { onClose: () => void }) {
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeRef.current();
+    };
+    window.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+      if (opener?.isConnected) opener.focus();
+    };
+  }, []);
+  return (
+    <div role="dialog" aria-modal="true" aria-label={RIDER_GUIDE.title} className="fixed inset-0 z-[60] overflow-y-auto bg-background text-foreground">
+      <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-border bg-background/95 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur">
+        <div className="min-w-0">
+          <h2 className="font-display text-lg font-semibold">{RIDER_GUIDE.title}</h2>
+          <p className="truncate font-body text-xs text-muted-foreground">{RIDER_GUIDE.subtitle}</p>
+        </div>
+        <button type="button" onClick={onClose} aria-label="Close the guide" className="grid size-11 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground">
+          <i aria-hidden className="bx bx-x text-3xl" />
+        </button>
+      </div>
+      <div className="mx-auto max-w-xl px-4 pb-[max(2rem,env(safe-area-inset-bottom))] pt-5">
+        <HelpCenter guide={RIDER_GUIDE} heading={false} />
+      </div>
     </div>
   );
 }

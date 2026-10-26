@@ -78,12 +78,10 @@ export function SocialButtons({ onSocial }: { onSocial: (p: "google" | "facebook
     "flex h-10 items-center justify-center gap-2 rounded-xl border border-transparent bg-card font-body text-sm font-medium transition-colors hover:text-primary";
   return (
     <>
-      <div className="grid grid-cols-2 gap-3">
+      {/* Facebook sign-in is not set up yet, so its button is not shown (a button that cannot work is worse than none). Put it back here when it is. */}
+      <div className="grid grid-cols-1 gap-3">
         <button type="button" className={btn} onClick={() => onSocial("google")}>
-          <i className="bx bxl-google text-lg" /> Google
-        </button>
-        <button type="button" className={btn} onClick={() => onSocial("facebook")}>
-          <i className="bx bxl-facebook-circle text-lg" /> Facebook
+          <i className="bx bxl-google text-lg" /> Continue with Google
         </button>
       </div>
       <div className="my-4 flex items-center gap-3 font-body text-xs text-muted-foreground">

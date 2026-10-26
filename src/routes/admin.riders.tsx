@@ -9,7 +9,7 @@ import { EmptyState, PageHead } from "@/components/moa/ui";
 import { useAuth } from "@/lib/auth";
 import { MapPicker } from "@/components/MapPicker";
 import { failLabel, mapLink, telLink } from "@/lib/delivery";
-import { GEO_HELP, locate, parseCoordinates } from "@/lib/geo";
+import { GEO_HELP, locate } from "@/lib/geo";
 import { timeAgo } from "@/lib/notifications";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -420,7 +420,6 @@ function WarehouseSheet({ warehouse, onClose, onSaved }: { warehouse: Warehouse 
     active: warehouse?.active ?? true,
     makeDefault: warehouse?.is_default ?? false,
   });
-  const [paste, setPaste] = useState("");
   const [locating, setLocating] = useState(false);
   const [map, setMap] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -438,13 +437,6 @@ function WarehouseSheet({ warehouse, onClose, onSaved }: { warehouse: Warehouse 
     setLocating(false);
     if (r.ok) setPin(r.where);
     else toast.error(GEO_HELP[r.reason]);
-  };
-  const fromText = () => {
-    const p = parseCoordinates(paste);
-    if (p) {
-      setPin(p);
-      setPaste("");
-    } else toast.error("No coordinates found in that. A short link (maps.app.goo.gl) does not contain them: open it in Maps and copy the long address, or the two numbers.");
   };
   const save = async () => {
     if (!valid) return;
@@ -490,17 +482,6 @@ function WarehouseSheet({ warehouse, onClose, onSaved }: { warehouse: Warehouse 
             <button type="button" className={btn.ghost} disabled={locating} onClick={() => void here()}>
               <i aria-hidden className="bx bx-current-location text-lg" /> {locating ? "Finding this device…" : "Use this device's location"}
             </button>
-          </div>
-          <div className="grid gap-1.5">
-            <label htmlFor="wh-paste" className="text-sm text-muted-foreground">
-              Or paste a Google Maps address or the two numbers
-            </label>
-            <div className="flex gap-2">
-              <input id="wh-paste" className={cn(field, "min-w-0 flex-1")} value={paste} onChange={(e) => setPaste(e.target.value)} placeholder="-1.9441, 30.0619" />
-              <button type="button" className={btn.ghost} disabled={paste.trim() === ""} onClick={fromText}>
-                Use it
-              </button>
-            </div>
           </div>
           {badPin && (
             <p role="alert" className="text-sm text-destructive">

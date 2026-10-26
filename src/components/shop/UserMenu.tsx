@@ -100,6 +100,9 @@ export function UserMenu({ variant, className }: { variant: "header" | "nav"; cl
           <Link to="/account" onClick={() => setOpen(false)} className={item}>
             <i className="bx bx-user-circle text-lg" /> Account
           </Link>
+          <Link to="/help" onClick={() => setOpen(false)} className={item}>
+            <i className="bx bx-help-circle text-lg" /> Help
+          </Link>
           <button
             type="button"
             className={item}
