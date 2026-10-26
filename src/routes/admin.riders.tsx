@@ -66,6 +66,8 @@ function Riders() {
   const [waiting, setWaiting] = useState(0);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [autoSettings, setAutoSettings] = useState<Auto | null>(null);
+  const [stockBy, setStockBy] = useState<Record<string, number>>({});
+  const [splitPolicy, setSplitPolicy] = useState<"transfer" | "decline" | null>(null);
   const [presence, setPresence] = useState<Presence[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -73,15 +75,18 @@ function Riders() {
   const [addOpen, setAddOpen] = useState(false);
 
   const load = useCallback(async () => {
-    const [r, d, w, s, wh, au, pr] = await Promise.all([
+    const [r, d, w, s, wh, au, pr, ws, sp] = await Promise.all([
       supabase.from("profiles").select("id, first_name, last_name, phone").eq("role", "rider").order("first_name"),
       supabase.from("deliveries").select("order_id, rider_id, status, assigned_at, delivered_at, failed_at, failed_reason, proof_flag, verified_by, needs_review, orders(code)").order("assigned_at", { ascending: false }).limit(300),
       supabase.rpc("rider_available_orders"),
       supabase.from("delivery_settings").select("max_active_per_rider, proof_radius_m").eq("id", 1).maybeSingle(),
-      supabase.from("warehouses").select("id, name, address, phone, lat, lng, active, is_default").order("created_at"),
+      supabase.from("warehouses").select("id, name, address, phone, lat, lng, active, is_default").is("archived_at", null).order("created_at"),
       // These two need migration 000022: without it the page simply does not show the Auto-assign section.
       supabase.from("delivery_settings").select("auto_assign, auto_radius_km, offer_seconds, auto_max_offers").eq("id", 1).maybeSingle(),
       supabase.from("rider_presence").select("rider_id, online, located_at, updated_at"),
+      // These need migration 000023: without it the page simply does not show stock or the setting below.
+      supabase.from("warehouse_stock").select("warehouse_id, qty").limit(5000),
+      supabase.from("delivery_settings").select("split_policy").eq("id", 1).maybeSingle(),
     ]);
     if (r.error || d.error || wh.error) {
       const msg = (r.error ?? d.error ?? wh.error)?.message ?? "";
@@ -97,6 +102,10 @@ function Riders() {
     setWarehouses((wh.data as Warehouse[] | null) ?? []);
     setAutoSettings(au.error ? null : ((au.data as Auto | null) ?? null));
     setPresence(pr.error ? [] : ((pr.data as Presence[] | null) ?? []));
+    const by: Record<string, number> = {};
+    for (const x of ws.error ? [] : ((ws.data as Array<{ warehouse_id: string; qty: number }> | null) ?? [])) by[x.warehouse_id] = (by[x.warehouse_id] ?? 0) + x.qty;
+    setStockBy(by);
+    setSplitPolicy(sp.error ? null : ((sp.data as { split_policy?: "transfer" | "decline" } | null)?.split_policy ?? null));
     setLoaded(true);
   }, []);
 
@@ -239,7 +248,7 @@ function Riders() {
         )}
       </section>
 
-      <WarehouseList items={warehouses} canEdit={isAdmin} onChanged={() => void load()} />
+      <WarehouseList items={warehouses} stock={stockBy} policy={splitPolicy} canEdit={isAdmin} onChanged={() => void load()} />
       <AutoAssign settings={autoSettings} presence={presence} riders={riders} deliveries={deliveries} canEdit={isAdmin} onSaved={() => void load()} />
       <Rules settings={settings} canEdit={isAdmin} onSaved={() => void load()} />
 
@@ -250,8 +259,9 @@ function Riders() {
 
 // ---------- warehouses: where riders collect orders ----------
 
-function WarehouseList({ items, canEdit, onChanged }: { items: Warehouse[]; canEdit: boolean; onChanged: () => void }) {
+function WarehouseList({ items, stock, policy, canEdit, onChanged }: { items: Warehouse[]; stock: Record<string, number>; policy: "transfer" | "decline" | null; canEdit: boolean; onChanged: () => void }) {
   const [editing, setEditing] = useState<Warehouse | "new" | null>(null);
+  const [removing, setRemoving] = useState<Warehouse | null>(null);
 
   const change = async (w: Warehouse, patch: { active?: boolean; makeDefault?: boolean }, ok: string) => {
     const { error } = await supabase.rpc("admin_save_warehouse", { p_id: w.id, p_name: w.name, p_address: w.address, p_phone: w.phone, p_lat: w.lat, p_lng: w.lng, p_active: patch.active ?? w.active, p_make_default: patch.makeDefault ?? false });
@@ -282,6 +292,7 @@ function WarehouseList({ items, canEdit, onChanged }: { items: Warehouse[]; canE
                 { label: "Edit", icon: "bx-edit", onSelect: () => setEditing(w) },
                 ...(!w.is_default && w.active ? [{ label: "Make the default", icon: "bx-star", onSelect: () => void change(w, { makeDefault: true }, `${w.name} is now the default.`) }] : []),
                 ...(!w.is_default ? [{ label: w.active ? "Close it" : "Open it again", icon: w.active ? "bx-lock" : "bx-lock-open", onSelect: () => void change(w, { active: !w.active }, w.active ? `${w.name} is closed.` : `${w.name} is open again.`) }] : []),
+                ...(!w.is_default ? [{ label: "Remove…", icon: "bx-trash", danger: true, onSelect: () => setRemoving(w) }] : []),
               ]
             : [];
           return (
@@ -295,6 +306,11 @@ function WarehouseList({ items, canEdit, onChanged }: { items: Warehouse[]; canE
                   </p>
                   <p className="truncate text-sm text-muted-foreground">{w.address || "No address yet"}</p>
                   <p className="text-sm text-muted-foreground">{w.phone || "No phone number"}</p>
+                  {stock[w.id] !== undefined && (
+                    <p className="mt-1 text-sm">
+                      <span className="tabular-nums">{stock[w.id]}</span> <span className="text-muted-foreground">item{stock[w.id] === 1 ? "" : "s"} in stock</span>
+                    </p>
+                  )}
                 </div>
                 {menu.length > 0 && <ActionMenu label={`Actions for ${w.name}`} items={menu} />}
               </div>
@@ -311,8 +327,86 @@ function WarehouseList({ items, canEdit, onChanged }: { items: Warehouse[]; canE
           );
         })}
       </ul>
+      {policy !== null && items.length > 1 && <SplitPolicy value={policy} canEdit={canEdit} onSaved={onChanged} />}
       {editing && <WarehouseSheet warehouse={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSaved={onChanged} />}
+      {removing && <RemoveWarehouse warehouse={removing} onClose={() => setRemoving(null)} onDone={() => { setRemoving(null); onChanged(); }} />}
     </section>
+  );
+}
+
+/** Removing a warehouse hides it; nothing is erased. The database says no, and why, if anything still depends on it. */
+function RemoveWarehouse({ warehouse, onClose, onDone }: { warehouse: Warehouse; onClose: () => void; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const go = async () => {
+    setBusy(true);
+    setError("");
+    const { error: e } = await supabase.rpc("admin_delete_warehouse", { p_id: warehouse.id });
+    setBusy(false);
+    if (e) return setError(e.message);
+    toast.success(`${warehouse.name} was removed.`);
+    onDone();
+  };
+  return (
+    <AdminSheet
+      open
+      onClose={busy ? () => undefined : onClose}
+      title={`Remove ${warehouse.name}?`}
+      subtitle="It leaves the list. Nothing is erased."
+      footer={
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button type="button" className={btn.ghost} disabled={busy} onClick={onClose}>
+            Keep it
+          </button>
+          <button type="button" className={btn.primary} disabled={busy} onClick={() => void go()}>
+            {busy ? "Removing…" : "Remove warehouse"}
+          </button>
+        </div>
+      }
+    >
+      <p className="text-sm text-muted-foreground">
+        A warehouse can be removed once it holds no stock and no order is being filled from it. Its past orders keep its name. If you add it back later it will start empty.
+      </p>
+      {error && (
+        <div role="alert" className="mt-4 grid gap-2 rounded-2xl border border-warning/40 bg-warning/10 p-3 text-sm text-warning">
+          <p>{error}</p>
+          {/stock|items/i.test(error) && (
+            <Link to="/admin/inventory" className="w-fit underline underline-offset-4">
+              Go to Inventory to move its stock
+            </Link>
+          )}
+        </div>
+      )}
+    </AdminSheet>
+  );
+}
+
+/** What happens when a cart needs more than one warehouse. */
+function SplitPolicy({ value, canEdit, onSaved }: { value: "transfer" | "decline"; canEdit: boolean; onSaved: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const save = async (v: "transfer" | "decline") => {
+    setBusy(true);
+    const { error } = await supabase.from("delivery_settings").update({ split_policy: v, updated_at: new Date().toISOString() }).eq("id", 1);
+    setBusy(false);
+    if (error) toast.error(error.message);
+    else {
+      toast.success("Saved.");
+      onSaved();
+    }
+  };
+  return (
+    <div className="mt-4 rounded-2xl border border-[#262626] p-4">
+      <label htmlFor="split-policy" className="text-sm font-medium">
+        When no single warehouse has everything in a cart
+      </label>
+      <select id="split-policy" className={cn(field, "mt-2")} value={value} disabled={!canEdit || busy} onChange={(e) => void save(e.target.value as "transfer" | "decline")}>
+        <option value="transfer">Fill it from the best warehouse, and move the missing items there</option>
+        <option value="decline">Do not accept it: ask the customer to order separately</option>
+      </select>
+      <p className="mt-2 text-sm text-muted-foreground">
+        {value === "transfer" ? "The order waits, and is not given to a rider, until you mark the moved items as received." : "The customer sees that the items cannot be delivered together right now."}
+      </p>
+    </div>
   );
 }
 

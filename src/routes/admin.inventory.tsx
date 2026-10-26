@@ -97,30 +97,85 @@ function Stepper({ label, value, onChange }: { label: string; value: string; onC
   );
 }
 
-// ---------- changing the stock of one product, per size ----------
+// ---------- changing the stock of one product, per size, in one warehouse ----------
+
+type Wh = { id: string; name: string; is_default: boolean };
+type Led = { warehouse_id: string; product_id: string; variant_id: string | null; qty: number };
+const shortName = (n: string) => n.replace(/^MOA Mart\s+/i, "");
+
+/** Where a product's stock is, one small label per warehouse. Shown only when there is more than one warehouse. */
+function WhChips({ p, warehouses, ledger }: { p: Row; warehouses: Wh[]; ledger: Led[] }) {
+  if (warehouses.length < 2) return null;
+  return (
+    <ul className="mt-1.5 flex flex-wrap gap-1.5" aria-label={`Where ${p.name} is`}>
+      {warehouses.map((w) => {
+        const n = ledger.filter((l) => l.warehouse_id === w.id && l.product_id === p.id).reduce((s, l) => s + l.qty, 0);
+        return (
+          <li key={w.id} className={cn("rounded-full px-2.5 py-0.5 text-xs", n > 0 ? "bg-white/10 text-foreground" : "bg-white/[0.04] text-muted-foreground")}>
+            {shortName(w.name)} {n}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
 type Target = { key: string; label: string; current: number; variantId: string | null };
 
-function AdjustSheet({ open, product, history, onClose, onSaved }: { open: boolean; product: Row | null; history: Movement[]; onClose: () => void; onSaved: () => void }) {
+function AdjustSheet({
+  open,
+  product,
+  history,
+  warehouses,
+  ledger,
+  onClose,
+  onSaved,
+}: {
+  open: boolean;
+  product: Row | null;
+  history: Movement[];
+  warehouses: Wh[];
+  ledger: Led[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const several = warehouses.length > 1;
+  const [wh, setWh] = useState("");
+  const here = several ? (warehouses.some((w) => w.id === wh) ? wh : warehouses[0]!.id) : null;
+  const hereName = warehouses.find((w) => w.id === here)?.name ?? "";
+
+  // With one warehouse these are the product's own numbers; with several, what this warehouse holds.
   const targets: Target[] = useMemo(() => {
     if (!product) return [];
+    const at = (variantId: string | null, fallback: number) =>
+      here === null ? fallback : ledger.filter((l) => l.warehouse_id === here && l.product_id === product.id && l.variant_id === variantId).reduce((n, l) => n + l.qty, 0);
     return product.product_variants.length > 0
-      ? sortedVariants(product).map((v) => ({ key: v.id, label: labelOf(v), current: v.stock, variantId: v.id }))
-      : [{ key: product.id, label: "In stock", current: product.stock, variantId: null }];
-  }, [product]);
+      ? sortedVariants(product).map((v) => ({ key: v.id, label: labelOf(v), current: at(v.id, v.stock), variantId: v.id }))
+      : [{ key: product.id, label: "In stock", current: at(null, product.stock), variantId: null }];
+  }, [product, ledger, here]);
 
   const [values, setValues] = useState<Record<string, string>>({});
   const [choice, setChoice] = useState(REASONS[0] ?? "Other");
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [moving, setMoving] = useState(false);
+  const [moveItem, setMoveItem] = useState("");
+  const [moveTo, setMoveTo] = useState("");
+  const [moveQty, setMoveQty] = useState("");
+  const [moveNote, setMoveNote] = useState("");
 
+  // The numbers follow the stock (they are refreshed after a save). The reason, and any message, only start afresh when the sheet is opened:
+  // otherwise the refresh after a failed save would wipe the message before it could be read.
   useEffect(() => {
     setValues(Object.fromEntries(targets.map((t) => [t.key, String(t.current)])));
+  }, [targets, open]);
+  useEffect(() => {
     setChoice(REASONS[0] ?? "Other");
     setText("");
     setError("");
-  }, [targets, open]);
+    setMoving(false);
+  }, [open]);
 
   const changes = targets.filter((t) => {
     const n = Number(values[t.key] ?? t.current);
@@ -140,9 +195,11 @@ function AdjustSheet({ open, product, history, onClose, onSaved }: { open: boole
     setBusy(true);
     for (const t of changes) {
       const n = Number(values[t.key]);
-      const { error: err } = t.variantId
-        ? await supabase.rpc("set_variant_stock", { p_variant_id: t.variantId, p_new_stock: n, p_reason: reason })
-        : await supabase.rpc("set_product_stock", { p_product_id: product.id, p_new_stock: n, p_reason: reason });
+      const { error: err } = several
+        ? await supabase.rpc("set_warehouse_stock", { p_warehouse: here, p_product: product.id, p_variant: t.variantId, p_qty: n, p_reason: reason })
+        : t.variantId
+          ? await supabase.rpc("set_variant_stock", { p_variant_id: t.variantId, p_new_stock: n, p_reason: reason })
+          : await supabase.rpc("set_product_stock", { p_product_id: product.id, p_new_stock: n, p_reason: reason });
       if (err) {
         setBusy(false);
         setError(`${t.label}: ${err.message}`);
@@ -154,6 +211,25 @@ function AdjustSheet({ open, product, history, onClose, onSaved }: { open: boole
     toast.success(changes.length === 1 ? "Stock updated." : `${changes.length} stock levels updated.`);
     onSaved();
     onClose();
+  };
+
+  const move = async () => {
+    if (!product || here === null) return;
+    const item = targets.find((t) => t.key === (moveItem || targets[0]?.key));
+    const to = moveTo || warehouses.find((w) => w.id !== here)?.id || "";
+    const n = Number(moveQty);
+    if (!item) return;
+    if (!Number.isInteger(n) || n < 1) return setError("Enter how many to move: a whole number, 1 or more.");
+    if (n > item.current) return setError(`${hereName} only has ${item.current} of this.`);
+    setError("");
+    setBusy(true);
+    const { error: err } = await supabase.rpc("move_stock", { p_product: product.id, p_variant: item.variantId, p_from: here, p_to: to, p_qty: n, p_note: moveNote.trim() || null });
+    setBusy(false);
+    if (err) return setError(err.message);
+    toast.success(`Moved ${n} to ${shortName(warehouses.find((w) => w.id === to)?.name ?? "the other warehouse")}.`);
+    setMoveQty("");
+    setMoveNote("");
+    onSaved();
   };
 
   const total = targets.reduce((n, t) => n + (Number.isInteger(Number(values[t.key])) ? Number(values[t.key]) : t.current), 0);
@@ -184,9 +260,27 @@ function AdjustSheet({ open, product, history, onClose, onSaved }: { open: boole
     >
       {product && (
         <div className="grid gap-6">
+          {several && (
+            <section aria-label="Warehouse">
+              <label htmlFor="inv-wh" className="mb-2 block font-display text-base font-semibold">
+                Which warehouse?
+              </label>
+              <select id="inv-wh" value={here ?? ""} onChange={(e) => { setWh(e.target.value); setMoveTo(""); }} className={field}>
+                {warehouses.map((w) => (
+                  <option key={w.id} value={w.id} className="bg-card">
+                    {w.name}
+                    {w.is_default ? " (default)" : ""}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-2 text-sm text-muted-foreground">
+                {product.stock} in all warehouses. The numbers below are what {shortName(hereName)} holds.
+              </p>
+            </section>
+          )}
           <section aria-label="Stock">
             <div className="mb-3 flex items-baseline justify-between">
-              <h3 className="font-display text-base font-semibold">{product.product_variants.length > 0 ? "Stock per option" : "Stock"}</h3>
+              <h3 className="font-display text-base font-semibold">{product.product_variants.length > 0 ? "Stock per option" : "Stock"}{several ? ` at ${shortName(hereName)}` : ""}</h3>
               {targets.length > 1 && <span className="text-sm text-muted-foreground">Total {total}</span>}
             </div>
             <ul className="grid gap-2">
@@ -234,6 +328,58 @@ function AdjustSheet({ open, product, history, onClose, onSaved }: { open: boole
             />
           </section>
 
+          {several && (
+            <section aria-label="Move stock">
+              <button type="button" aria-expanded={moving} onClick={() => setMoving((v) => !v)} className={cn(btn.ghost, "w-full justify-between")}>
+                <span>Move some to another warehouse</span>
+                <i aria-hidden className={cn("bx text-xl", moving ? "bx-chevron-up" : "bx-chevron-down")} />
+              </button>
+              {moving && (
+                <div className="mt-3 grid gap-3 rounded-2xl border border-[#262626] p-3">
+                  {targets.length > 1 && (
+                    <div className="grid gap-1.5">
+                      <label htmlFor="mv-item" className="text-sm text-muted-foreground">
+                        Which option
+                      </label>
+                      <select id="mv-item" value={moveItem || targets[0]!.key} onChange={(e) => setMoveItem(e.target.value)} className={field}>
+                        {targets.map((t) => (
+                          <option key={t.key} value={t.key} className="bg-card">
+                            {t.label} ({t.current} here)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="grid gap-1.5">
+                      <label htmlFor="mv-to" className="text-sm text-muted-foreground">
+                        Move to
+                      </label>
+                      <select id="mv-to" value={moveTo || warehouses.find((w) => w.id !== here)?.id} onChange={(e) => setMoveTo(e.target.value)} className={field}>
+                        {warehouses.filter((w) => w.id !== here).map((w) => (
+                          <option key={w.id} value={w.id} className="bg-card">
+                            {w.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="grid gap-1.5">
+                      <label htmlFor="mv-qty" className="text-sm text-muted-foreground">
+                        How many
+                      </label>
+                      <input id="mv-qty" inputMode="numeric" value={moveQty} onChange={(e) => setMoveQty(e.target.value.replace(/\D/g, ""))} className={field} />
+                    </div>
+                  </div>
+                  <input aria-label="A note about this move" value={moveNote} onChange={(e) => setMoveNote(e.target.value)} maxLength={120} placeholder="A note (optional)" className={field} />
+                  <button type="button" disabled={busy || moveQty === ""} onClick={() => void move()} className={btn.primary}>
+                    {busy ? "Moving…" : "Move it"}
+                  </button>
+                  <p className="text-sm text-muted-foreground">It leaves {shortName(hereName)} and is added to the other warehouse now. The total does not change.</p>
+                </div>
+              )}
+            </section>
+          )}
+
           <section aria-label="History">
             <h3 className="mb-2 font-display text-base font-semibold">Recent changes</h3>
             {history.length === 0 ? (
@@ -278,6 +424,8 @@ function Inventory() {
   const [sheetId, setSheetId] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [history, setHistory] = useState<Movement[]>([]);
+  const [warehouses, setWarehouses] = useState<Wh[]>([]);
+  const [ledger, setLedger] = useState<Led[]>([]);
 
   // Arriving from a link (for example "Restock" on the Overview): search for that product, in every level.
   useEffect(() => {
@@ -310,6 +458,14 @@ function Inventory() {
         .limit(500);
       if (error) throw error;
       setRows((data ?? []) as unknown as Row[]);
+      // Where the stock is (needs migration 000023: without it the page is the one it always was).
+      const [wh, led] = await Promise.all([
+        supabase.from("warehouses").select("id, name, is_default").eq("active", true).is("archived_at", null).order("name"),
+        supabase.from("warehouse_stock").select("warehouse_id, product_id, variant_id, qty").limit(10000),
+      ]);
+      const list = wh.error ? [] : ((wh.data ?? []) as Wh[]);
+      setWarehouses([...list].sort((a, b) => Number(b.is_default) - Number(a.is_default) || a.name.localeCompare(b.name)));
+      setLedger(led.error ? [] : ((led.data ?? []) as Led[]));
       setLoadError("");
     } catch {
       setLoadError("Could not load products. Check your connection and try again.");
@@ -475,6 +631,7 @@ function Inventory() {
                           {p.sku} · {p.category?.name ?? "—"}
                         </p>
                         <span className={cn("mt-1 inline-block whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium", s.cls)}>{s.label}</span>
+                        <WhChips p={p} warehouses={warehouses} ledger={ledger} />
                       </div>
                       <p className="shrink-0 font-display text-3xl font-semibold tabular-nums">{p.stock}</p>
                     </div>
@@ -534,6 +691,7 @@ function Inventory() {
                                   {p.product_variants.length} options{out.length > 0 ? ` · ${out.length} out of stock` : ""}
                                 </p>
                               )}
+                              <WhChips p={p} warehouses={warehouses} ledger={ledger} />
                             </div>
                           </div>
                         </td>
@@ -601,6 +759,8 @@ function Inventory() {
         open={sheetOpen}
         product={sheetRow}
         history={history}
+        warehouses={warehouses}
+        ledger={ledger}
         onClose={() => setSheetOpen(false)}
         onSaved={() => {
           void load();

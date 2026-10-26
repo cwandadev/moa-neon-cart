@@ -62,6 +62,8 @@ type Row = {
   lat: number | null;
   lng: number | null;
   warehouse_id: string | null;
+  /** False while goods for this order are still moving between warehouses. */
+  stock_ready: boolean;
   deliveries: DeliveryLite | DeliveryLite[] | null;
   order_items: Item[];
 };
@@ -72,7 +74,7 @@ type Counts = Record<Tab, number>;
 
 const PAGE = 25;
 const SELECT =
-  "id, code, created_at, paid_at, customer_name, phone, location, preferred_time, notes, total, payment_status, fulfilment_status, refund_status, cancel_reason, lat, lng, warehouse_id, order_items(name, variant_label, image, qty, price), deliveries(status, failed_reason, proof_flag, verified_by, rider:profiles!deliveries_rider_id_fkey(first_name, last_name))";
+  "id, code, created_at, paid_at, customer_name, phone, location, preferred_time, notes, total, payment_status, fulfilment_status, refund_status, cancel_reason, lat, lng, warehouse_id, stock_ready, order_items(name, variant_label, image, qty, price), deliveries(status, failed_reason, proof_flag, verified_by, rider:profiles!deliveries_rider_id_fkey(first_name, last_name))";
 
 const RANGES: Array<[Range, string]> = [
   ["all", "All time"],
@@ -110,7 +112,7 @@ function stageOf(o: Row): { label: string; tone: Tone } {
     case "out_for_delivery":
       return { label: "On the way", tone: "info" };
     case "confirmed":
-      return { label: "To dispatch", tone: "warning" };
+      return o.stock_ready === false ? { label: "Waiting for items", tone: "warning" } : { label: "To dispatch", tone: "warning" };
     case "pending":
       return o.payment_status === "failed"
         ? { label: "Payment failed", tone: "danger" }
@@ -119,6 +121,9 @@ function stageOf(o: Row): { label: string; tone: Tone } {
       return { label: o.fulfilment_status, tone: "muted" };
   }
 }
+
+/** A finished order can be taken off the list, unless a refund is still to be paid. */
+const canRemove = (o: Row) => (o.fulfilment_status === "delivered" || o.fulfilment_status === "cancelled") && o.refund_status !== "pending";
 
 const refundTone = (s: string): Tone => (s === "completed" ? "success" : s === "failed" ? "danger" : "warning");
 
@@ -183,7 +188,7 @@ type Filters = { tab: Tab; range: Range; term: string };
 // The query builder comes from the database library; this one helper adds the filters to either query.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function withFilters(q: any, f: Filters, includeTab: boolean): any {
-  let out = q;
+  let out = q.is("archived_at", null);   // removed orders are hidden here (they are kept, and still counted in Analytics and Finance)
   if (includeTab && f.tab !== "all") out = out.eq("fulfilment_status", f.tab);
   const since = sinceIso(f.range);
   if (since) out = out.gte("created_at", since);
@@ -348,6 +353,53 @@ function CancelDialog({ order, onClose, onDone }: { order: Row; onClose: () => v
 }
 
 /** Cancel several orders at once, with one reason. Paid orders are refunded, one by one, by the same function as a single cancel. */
+/** Takes finished orders off the list. Nothing is erased: they stay in Analytics and Finance, and can be brought back. */
+function RemoveDialog({ orders, onClose, onDone }: { orders: Row[]; onClose: () => void; onDone: (msg: string, failed: boolean) => void }) {
+  const [busy, setBusy] = useState(false);
+  const n = orders.length;
+  const go = async () => {
+    setBusy(true);
+    const { data, error } = await supabase.rpc("admin_archive_orders", { p_ids: orders.map((o) => o.id) });
+    setBusy(false);
+    if (error) return onDone(error.message, true);
+    const r = data as { archived?: number; skipped?: number } | null;
+    const done = r?.archived ?? 0;
+    onDone(done === 0 ? "Nothing was removed. A refund may still be due." : `${done} order${done === 1 ? "" : "s"} removed from the list.${(r?.skipped ?? 0) > 0 ? ` ${r?.skipped} could not be removed yet.` : ""}`, done === 0);
+  };
+  return (
+    <AdminSheet
+      open
+      onClose={busy ? () => undefined : onClose}
+      title={n === 1 ? `Remove ${orders[0]!.code}?` : `Remove ${n} orders?`}
+      subtitle="They leave this list. Nothing is erased."
+      footer={
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button type="button" className={btn.ghost} disabled={busy} onClick={onClose}>
+            Keep {n === 1 ? "it" : "them"}
+          </button>
+          <button type="button" className={btn.primary} disabled={busy} onClick={() => void go()}>
+            {busy ? "Removing…" : n === 1 ? "Remove it" : `Remove ${n} orders`}
+          </button>
+        </div>
+      }
+    >
+      <p className="text-sm text-muted-foreground">
+        {n === 1 ? "This order" : "These orders"} will be hidden from Orders for you and your team. The sales, payments and delivery history stay in Analytics and Finance, and the customer keeps {n === 1 ? "it" : "them"} in their own list.
+      </p>
+      {n > 1 && (
+        <ul className="mt-3 grid max-h-48 gap-1 overflow-y-auto text-sm">
+          {orders.map((o) => (
+            <li key={o.id} className="flex justify-between gap-3 rounded-lg bg-white/[0.04] px-3 py-2">
+              <span className="font-medium">{o.code}</span>
+              <span className="text-muted-foreground">{o.fulfilment_status === "delivered" ? "Delivered" : "Cancelled"}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </AdminSheet>
+  );
+}
+
 function BulkCancelDialog({ orders, onClose, onDone }: { orders: Row[]; onClose: () => void; onDone: (msg: string, failed: boolean) => void }) {
   const paid = orders.filter((o) => o.payment_status === "paid");
   const [choice, setChoice] = useState(REASONS[0] ?? "Other");
@@ -723,19 +775,20 @@ const stepIndex = (s: string) => (s === "delivered" ? 3 : s === "out_for_deliver
 
 function Progress({ status }: { status: string }) {
   const at = stepIndex(status);
+  const finished = status === "delivered";    // a delivered order has done all four steps, the last one too
   return (
     <ol className="grid grid-cols-4 gap-1" aria-label="Order progress">
       {STEPS.map((s, i) => (
-        <li key={s} className="grid justify-items-center gap-1.5 text-center" aria-current={i === at ? "step" : undefined}>
+        <li key={s} className="grid justify-items-center gap-1.5 text-center" aria-current={!finished && i === at ? "step" : undefined}>
           <span className="relative grid w-full place-items-center">
             <span className={cn("absolute inset-x-0 top-1/2 h-0.5 -translate-y-1/2", i <= at ? "bg-foreground/60" : "bg-white/10")} />
             <span
               className={cn(
                 "relative grid size-6 place-items-center rounded-full border text-xs",
-                i < at ? "border-foreground bg-foreground text-black" : i === at ? "border-foreground bg-black text-foreground" : "border-white/20 bg-black text-muted-foreground",
+                i < at || finished ? "border-foreground bg-foreground text-black" : i === at ? "border-foreground bg-black text-foreground" : "border-white/20 bg-black text-muted-foreground",
               )}
             >
-              {i < at ? <i aria-hidden className="bx bx-check" /> : i + 1}
+              {i < at || finished ? <i aria-hidden className="bx bx-check" /> : i + 1}
             </span>
           </span>
           <span className={cn("text-xs", i <= at ? "text-foreground" : "text-muted-foreground")}>{s}</span>
@@ -887,6 +940,7 @@ function Orders() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busyId, setBusyId] = useState<string | null>(null);
   const [bulkCancel, setBulkCancel] = useState<Row[] | null>(null);
+  const [removeRows, setRemoveRows] = useState<Row[] | null>(null);
   const [exporting, setExporting] = useState(false);
   const [cancelFor, setCancelFor] = useState<Row | null>(null);
   const [phoneShown, setPhoneShown] = useState<Set<string>>(new Set());
@@ -1033,6 +1087,7 @@ function Orders() {
 
   const selRows = rows.filter((o) => selected.has(o.id));
   const cancellable = selRows.filter(canCancel);
+  const removable = selRows.filter(canRemove);
   const allSelected = rows.length > 0 && rows.every((o) => selected.has(o.id));
   const press = useLongPress((id) => {
     setSelectMode(true);
@@ -1249,7 +1304,14 @@ function Orders() {
                 hint: cancellable.length === 0 ? "None of these can be cancelled" : cancellable.length < selRows.length ? "The others are already finished, or paid (admins only)" : "Paid orders are refunded",
                 onSelect: () => setBulkCancel(cancellable.slice(0, 25)),
               },
-              { label: "Delete orders", icon: "bx-trash", disabled: true, hint: "Orders are never deleted. Cancel them instead.", onSelect: () => undefined },
+              {
+                label: removable.length === 0 || removable.length === selRows.length ? "Remove from the list…" : `Remove ${removable.length} of ${selRows.length}…`,
+                icon: "bx-trash",
+                danger: true,
+                disabled: removable.length === 0,
+                hint: removable.length === 0 ? "Only delivered or cancelled orders can be removed" : "They stay in Analytics and Finance",
+                onSelect: () => setRemoveRows(removable),
+              },
             ] satisfies MenuItem[]
           }
         >
@@ -1266,6 +1328,21 @@ function Orders() {
             setBulkCancel(null);
             setSelected(new Set());
             setSelectMode(false);
+            if (failed) toast.error(msg);
+            else toast.success(msg);
+            void load();
+          }}
+        />
+      )}
+
+      {removeRows && (
+        <RemoveDialog
+          orders={removeRows}
+          onClose={() => setRemoveRows(null)}
+          onDone={(msg, failed) => {
+            setRemoveRows(null);
+            setSelected(new Set());
+            setSheetOpen(false);
             if (failed) toast.error(msg);
             else toast.success(msg);
             void load();
@@ -1302,6 +1379,11 @@ function Orders() {
                 {canCancel(sheetRow) && (
                   <button type="button" onClick={() => setCancelFor(sheetRow)} className={btn.dangerQuiet}>
                     Cancel order…
+                  </button>
+                )}
+                {canRemove(sheetRow) && (
+                  <button type="button" onClick={() => setRemoveRows([sheetRow])} className={btn.dangerQuiet}>
+                    <i aria-hidden className="bx bx-trash text-lg" /> Remove from the list…
                   </button>
                 )}
               </div>

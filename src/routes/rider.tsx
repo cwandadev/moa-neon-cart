@@ -851,6 +851,8 @@ function DeliverStop({ d, index, total, open, onOpen, onChanged }: { d: RiderDel
 
   const extra = [d.preferred_time, d.notes].filter(Boolean).join(" · ");
   const dist = legLabel(d);
+  const customer = { lat: d.lat, lng: d.lng, text: d.location };
+  const fromWarehouse = w ? routeLink({ lat: w.lat, lng: w.lng, text: w.address || w.name }, customer) : navigateLink(customer);
   const first = (d.customer_name ?? "").split(" ")[0] || "the customer";
   return (
     <Card>
@@ -887,7 +889,8 @@ function DeliverStop({ d, index, total, open, onOpen, onChanged }: { d: RiderDel
       </div>
 
       <div className="mt-3 flex gap-2">
-        <a href={navigateLink({ lat: d.lat, lng: d.lng, text: d.location })} target="_blank" rel="noreferrer" className={cn(secondary, "min-h-14 flex-1")}>
+        {/* The route starts where the parcel was collected, not where the phone happens to be. */}
+        <a href={fromWarehouse} target="_blank" rel="noreferrer" className={cn(secondary, "min-h-14 flex-1")}>
           <i aria-hidden className="bx bx-navigation text-xl" /> Navigate
         </a>
         {d.phone && <CallRound phone={d.phone} who={first} />}
@@ -901,8 +904,8 @@ function DeliverStop({ d, index, total, open, onOpen, onChanged }: { d: RiderDel
           <button type="button" className={cn(quiet, "text-left")} onClick={() => setSheet("photo")}>
             The customer can&apos;t give the code
           </button>
-          <a href={routeLink({ lat: w?.lat, lng: w?.lng, text: w?.address || w?.name }, { lat: d.lat, lng: d.lng, text: d.location })} target="_blank" rel="noreferrer" className={cn(quiet, "flex items-center")}>
-            Show the whole route from the warehouse
+          <a href={navigateLink(customer)} target="_blank" rel="noreferrer" className={cn(quiet, "flex items-center")}>
+            Navigate from where I am now
           </a>
           <button type="button" className={cn(quiet, "text-left")} onClick={() => setSheet("fail")}>
             I can&apos;t deliver this order
