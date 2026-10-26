@@ -44,6 +44,10 @@ async function call<T>(fn: string, args?: Record<string, unknown>): Promise<{ da
 const BUCKET = "delivery-proofs";
 const PHOTO_FRESH_MS = 25 * 60 * 1000; // the database accepts photos up to 30 minutes old
 
+type Offer = { offer_id: string; order_id: string; code: string; warehouse: { name: string; address: string }; pickup_m: number | null; delivery_km: number | null; seconds_left: number };
+type OfferState = { auto: boolean; online: boolean; offer: Offer | null };
+const PING_EVERY_MS = 30_000;
+
 // ---------- small pieces ----------
 
 const primary =
@@ -110,15 +114,28 @@ function RiderApp({ name }: { name: string }) {
   const [loadError, setLoadError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
+  const [auto, setAuto] = useState(false); // is auto-assign switched on? (then the Online switch shows)
+  const [online, setOnline] = useState(false);
+  const [offer, setOffer] = useState<Offer | null>(null);
+  const [onlineBusy, setOnlineBusy] = useState(false);
+  const [locNote, setLocNote] = useState("");
   const [, tick] = useState(0);
   const alive = useRef(true);
   const { items: notes, unread, loaded: notesLoaded } = useNotifications();
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
-    const [a, m] = await Promise.all([call<AvailableOrder[]>("rider_available_orders"), call<RiderDelivery[]>("rider_my_deliveries")]);
+    const [a, m, o] = await Promise.all([call<AvailableOrder[]>("rider_available_orders"), call<RiderDelivery[]>("rider_my_deliveries"), call<OfferState>("rider_my_offer")]);
     if (!alive.current) return;
     setRefreshing(false);
+    if (o.data) {
+      setAuto(o.data.auto === true);
+      setOnline(o.data.online === true);
+      setOffer(o.data.offer ?? null);
+    } else {
+      setAuto(false); // a database that does not have offers yet is not an error: the rest works as before
+      setOffer(null);
+    }
     const err = a.error ?? m.error;
     if (err) {
       setLoadError(err);
@@ -168,6 +185,56 @@ function RiderApp({ name }: { name: string }) {
     seen.current = newest ?? "";
   }, [newest, notesLoaded, refresh]);
 
+  const goOnline = async (on: boolean) => {
+    setOnlineBusy(true);
+    setLocNote("");
+    if (on) {
+      const where = await locate({ quick: true });
+      const r = await call<{ ok: boolean }>("rider_set_online", { p_online: true, p_lat: where.ok ? where.where.lat : null, p_lng: where.ok ? where.where.lng : null, p_accuracy: where.ok ? where.where.accuracy : null });
+      if (r.error) toast.error(r.error);
+      else {
+        setOnline(true);
+        if (!where.ok) setLocNote(`You are online, but we cannot see where you are, so you will not be offered orders. ${GEO_HELP[where.reason]}`);
+      }
+    } else {
+      const r = await call<{ ok: boolean }>("rider_set_online", { p_online: false });
+      if (r.error) toast.error(r.error);
+      else {
+        setOnline(false);
+        setOffer(null);
+      }
+    }
+    setOnlineBusy(false);
+    void refresh();
+  };
+
+  // While online and looking at the app, say where we are now and then. A phone that is locked or a page that is closed stops, so the office
+  // stops offering that rider anything: nobody is offered an order they cannot see.
+  useEffect(() => {
+    if (!online || !auto) return;
+    let stop = false;
+    const ping = async () => {
+      if (document.visibilityState !== "visible") return;
+      const where = await locate({ quick: true });
+      if (stop) return;
+      if (!where.ok) {
+        setLocNote(`We cannot see where you are, so you will not be offered orders. ${GEO_HELP[where.reason]}`);
+        return;
+      }
+      setLocNote("");
+      const r = await call<{ ok: boolean; online: boolean }>("rider_ping", { p_lat: where.where.lat, p_lng: where.where.lng, p_accuracy: where.where.accuracy });
+      if (!stop && r.data && r.data.online === false) setOnline(false);
+    };
+    const timer = setInterval(() => void ping(), PING_EVERY_MS);
+    const wake = () => void ping();
+    document.addEventListener("visibilitychange", wake);
+    return () => {
+      stop = true;
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", wake);
+    };
+  }, [online, auto]);
+
   const active = mine.filter((d) => d.status === "assigned" || d.status === "picked_up");
   const done = mine.filter((d) => d.status === "delivered" || d.status === "failed");
   // Open on what matters: what is in your hands, otherwise what is waiting.
@@ -179,6 +246,7 @@ function RiderApp({ name }: { name: string }) {
     } catch {
       /* ignore */
     }
+    if (online) await call("rider_set_online", { p_online: false });
     await supabase.auth.signOut();
     window.location.assign("/login");
   };
@@ -202,6 +270,20 @@ function RiderApp({ name }: { name: string }) {
               {updatedAt ? ` · updated ${timeAgo(new Date(updatedAt).toISOString())}` : ""}
             </p>
           </div>
+          {auto && (
+            <button
+              type="button"
+              role="switch"
+              aria-checked={online}
+              aria-label={online ? "Online: tap to go offline" : "Offline: tap to go online"}
+              disabled={onlineBusy}
+              onClick={() => void goOnline(!online)}
+              className={cn("flex min-h-11 shrink-0 items-center gap-2 rounded-full border px-3 font-body text-sm font-medium transition-colors disabled:opacity-60", online ? "border-primary/60 bg-primary/15 text-primary" : "border-border text-muted-foreground")}
+            >
+              <span aria-hidden className={cn("size-2.5 rounded-full", online ? "bg-primary" : "bg-muted-foreground/60")} />
+              {onlineBusy ? "…" : online ? "Online" : "Offline"}
+            </button>
+          )}
           <button type="button" onClick={() => void refresh()} aria-label="Refresh" className="grid size-11 place-items-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground">
             <i aria-hidden className={cn("bx bx-refresh text-2xl", refreshing && "animate-spin")} />
           </button>
@@ -215,6 +297,12 @@ function RiderApp({ name }: { name: string }) {
         {loadError && (
           <p role="alert" className={cn(alertBox, "mb-4")}>
             {loadError}
+          </p>
+        )}
+        {offer && <OfferCard key={offer.offer_id} offer={offer} onDone={() => void refresh()} onTook={() => setTab("mine")} />}
+        {auto && online && locNote && (
+          <p role="status" className="mb-4 rounded-2xl border border-warning/40 bg-warning/10 p-3 font-body text-sm text-warning">
+            {locNote}
           </p>
         )}
         {shown === "alerts" ? (
@@ -268,6 +356,66 @@ function Empty({ icon, title, body }: { icon: string; title: string; body: strin
       <p className="mt-2 font-display text-base font-semibold">{title}</p>
       <p className="mt-1 font-body text-sm text-muted-foreground">{body}</p>
     </li>
+  );
+}
+
+// ---------- an order offered to this rider ----------
+
+function OfferCard({ offer, onDone, onTook }: { offer: Offer; onDone: () => void; onTook: () => void }) {
+  const [until] = useState(() => Date.now() + offer.seconds_left * 1000);
+  const [left, setLeft] = useState(offer.seconds_left);
+  const [busy, setBusy] = useState(false);
+  const total = useRef(Math.max(1, offer.seconds_left));
+  const again = useRef(onDone);
+  again.current = onDone;
+  useEffect(() => {
+    const t = setInterval(() => {
+      const s = Math.max(0, Math.ceil((until - Date.now()) / 1000));
+      setLeft(s);
+      if (s === 0) {
+        clearInterval(t);
+        again.current(); // the time is up: the office moves it on to the next rider, so look again
+      }
+    }, 1000);
+    return () => clearInterval(t);
+  }, [until]);
+
+  const answer = async (accept: boolean) => {
+    setBusy(true);
+    const r = await call<{ ok: boolean; reason?: string }>("rider_respond_offer", { p_offer: offer.offer_id, p_accept: accept });
+    setBusy(false);
+    if (r.error) toast.error(r.error);
+    else if (accept && r.data?.ok) {
+      toast.success(`${offer.code} is yours. Collect it first.`);
+      onTook();
+    } else if (accept) toast.error("That offer is gone: it ran out of time or was given to someone else.");
+    onDone();
+  };
+  const near = offer.pickup_m === null ? null : offer.pickup_m < 1000 ? `${Math.max(50, Math.round(offer.pickup_m / 50) * 50)} m` : `${(offer.pickup_m / 1000).toFixed(1)} km`;
+  return (
+    <section aria-label="New order for you" className="mb-4 rounded-3xl border-2 border-primary bg-primary/10 p-4 shadow-[var(--glow-primary)]">
+      <div className="flex items-center justify-between gap-3">
+        <span className="rounded-full bg-primary px-2.5 py-0.5 font-display text-[11px] font-semibold uppercase tracking-wider text-primary-foreground">New order for you</span>
+        <span className="font-display text-lg font-semibold tabular-nums" role="timer" aria-live="off" aria-label={`${left} seconds left`}>
+          {left}s
+        </span>
+      </div>
+      <p className="mt-2 font-display text-4xl font-semibold leading-none tracking-tight">{offer.code}</p>
+      <p className="mt-2 font-body text-base">
+        Collect at <span className="font-semibold">{offer.warehouse.name}</span>
+        {near && <span className="text-muted-foreground"> · you are {near} away</span>}
+      </p>
+      {offer.delivery_km !== null && <p className="font-body text-sm text-muted-foreground">Then about {offer.delivery_km} km to the customer</p>}
+      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-primary/20" aria-hidden>
+        <div className="h-full rounded-full bg-primary transition-[width] duration-1000 ease-linear motion-reduce:transition-none" style={{ width: `${Math.round((left / total.current) * 100)}%` }} />
+      </div>
+      <button type="button" disabled={busy || left === 0} onClick={() => void answer(true)} className={cn(primary, "mt-4")}>
+        {busy ? "…" : "Accept"}
+      </button>
+      <button type="button" disabled={busy || left === 0} onClick={() => void answer(false)} className={cn(quiet, "mt-1 w-full")}>
+        Not now
+      </button>
+    </section>
   );
 }
 
@@ -525,7 +673,7 @@ function CollectGroup({ group, onChanged }: { group: Group; onChanged: () => Pro
   return (
     <Card>
       <div className="flex items-center justify-between gap-3">
-        {chip("info", "Collect")}
+        {chip("warning", "Collect")}
         <span className="font-body text-xs text-muted-foreground">
           {group.parcels.length} parcel{group.parcels.length === 1 ? "" : "s"}
         </span>

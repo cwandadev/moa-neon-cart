@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
+import { Avatar } from "@/components/Avatar";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { useNotifications } from "@/lib/notifications";
@@ -43,7 +44,7 @@ export function UserMenu({ variant, className }: { variant: "header" | "nav"; cl
           aria-label={user && unread > 0 ? `Account, ${unread} unread notifications` : "Account"}
           onClick={onClick}
         >
-          <i className="bx bx-user text-xl" />
+          {user ? <Avatar user={user} size={28} /> : <i className="bx bx-user text-xl" />}
           {user && unread > 0 && (
             <span className="absolute -right-1.5 -top-1.5 grid h-5 min-w-5 animate-in zoom-in-50 place-items-center rounded-full bg-destructive px-1 text-[10px] font-semibold text-white duration-200">
               {unread > 9 ? "9+" : unread}
@@ -57,7 +58,7 @@ export function UserMenu({ variant, className }: { variant: "header" | "nav"; cl
           onClick={onClick}
           className={className}
         >
-          <i className="bx bx-user text-2xl" />
+          {user ? <Avatar user={user} size={26} /> : <i className="bx bx-user text-2xl" />}
           {user && unread > 0 && <span className="absolute left-1/2 top-2 ml-1.5 size-2.5 rounded-full bg-destructive" />}
         </button>
       )}
@@ -69,11 +70,14 @@ export function UserMenu({ variant, className }: { variant: "header" | "nav"; cl
             variant === "header" ? "top-full mt-2" : "bottom-full mb-3",
           )}
         >
-          <div className="px-3 py-2">
-            <p className="truncate font-body text-sm font-medium">
-              {user.firstName} {user.lastName}
-            </p>
-            <p className="truncate font-body text-xs text-muted-foreground">{user.email}</p>
+          <div className="flex items-center gap-3 px-3 py-2">
+            <Avatar user={user} size={36} />
+            <div className="min-w-0">
+              <p className="truncate font-body text-sm font-medium">
+                {user.firstName} {user.lastName}
+              </p>
+              <p className="truncate font-body text-xs text-muted-foreground">{user.email}</p>
+            </div>
           </div>
           <div className="my-1 h-px bg-border" />
           {/* menu order: admin first */}

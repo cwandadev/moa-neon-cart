@@ -17,6 +17,10 @@ export type AuthUser = {
   lastName: string;
   email: string;
   role: Role;
+  /** The photo they uploaded themselves (a public address in our own storage), or null. */
+  avatarUrl: string | null;
+  /** The photo from their Google account, if they signed in with Google, or null. */
+  googlePhoto: string | null;
 };
 
 export type AuthResult = { ok: true; notice?: string } | { ok: false; error: string };
@@ -135,18 +139,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile((p) => (p && p.id === sessionUserId ? p : null));
     void (async () => {
       try {
-        const { data } = await supabase
-          .from("profiles")
-          .select("first_name, last_name, role")
-          .eq("id", sessionUserId)
-          .maybeSingle();
+        // Ask for the profile photo too; if the database has not been updated for it yet, ask the old way, so that nobody is ever signed out by it.
+        let found = await supabase.from("profiles").select("first_name, last_name, role, avatar_path").eq("id", sessionUserId).maybeSingle();
+        if (found.error) found = await supabase.from("profiles").select("first_name, last_name, role").eq("id", sessionUserId).maybeSingle();
+        const data = found.data as { first_name?: string; last_name?: string; role?: string; avatar_path?: string | null } | null;
         if (cancelled || !data) return;
+        // Their own photo if they added one, otherwise the one Google gave us (looked up on this phone, not over the network).
+        const { data: sess } = await supabase.auth.getSession();
+        const meta = (sess.session?.user.user_metadata ?? {}) as Record<string, unknown>;
+        const google = [meta["avatar_url"], meta["picture"]].find((v): v is string => typeof v === "string" && v.startsWith("https://")) ?? null;
         setProfile({
           id: sessionUserId,
           firstName: data.first_name ?? "",
           lastName: data.last_name ?? "",
           email: sessionEmail,
           role: (data.role as Role) ?? "customer",
+          avatarUrl: data.avatar_path ? supabase.storage.from("avatars").getPublicUrl(data.avatar_path).data.publicUrl : null,
+          googlePhoto: google,
         });
         // A rider lives in the rider screen: anywhere else in the app they are sent back to it (the password pages excepted).
         try {
