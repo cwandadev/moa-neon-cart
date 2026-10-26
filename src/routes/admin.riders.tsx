@@ -20,6 +20,8 @@ export const Route = createFileRoute("/admin/riders")({
 });
 
 type Rider = { id: string; first_name: string; last_name: string; phone: string | null };
+type Auto = { auto_assign: boolean; auto_radius_km: number; offer_seconds: number; auto_max_offers: number };
+type Presence = { rider_id: string; online: boolean; located_at: string | null; updated_at: string };
 type Dlv = {
   order_id: string;
   rider_id: string;
@@ -63,18 +65,23 @@ function Riders() {
   const [deliveries, setDeliveries] = useState<Dlv[]>([]);
   const [waiting, setWaiting] = useState(0);
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [autoSettings, setAutoSettings] = useState<Auto | null>(null);
+  const [presence, setPresence] = useState<Presence[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const [addOpen, setAddOpen] = useState(false);
 
   const load = useCallback(async () => {
-    const [r, d, w, s, wh] = await Promise.all([
+    const [r, d, w, s, wh, au, pr] = await Promise.all([
       supabase.from("profiles").select("id, first_name, last_name, phone").eq("role", "rider").order("first_name"),
       supabase.from("deliveries").select("order_id, rider_id, status, assigned_at, delivered_at, failed_at, failed_reason, proof_flag, verified_by, needs_review, orders(code)").order("assigned_at", { ascending: false }).limit(300),
       supabase.rpc("rider_available_orders"),
       supabase.from("delivery_settings").select("max_active_per_rider, proof_radius_m").eq("id", 1).maybeSingle(),
       supabase.from("warehouses").select("id, name, address, phone, lat, lng, active, is_default").order("created_at"),
+      // These two need migration 000022: without it the page simply does not show the Auto-assign section.
+      supabase.from("delivery_settings").select("auto_assign, auto_radius_km, offer_seconds, auto_max_offers").eq("id", 1).maybeSingle(),
+      supabase.from("rider_presence").select("rider_id, online, located_at, updated_at"),
     ]);
     if (r.error || d.error || wh.error) {
       const msg = (r.error ?? d.error ?? wh.error)?.message ?? "";
@@ -88,6 +95,8 @@ function Riders() {
     setWaiting(Array.isArray(w.data) ? w.data.length : 0);
     setSettings((s.data as Settings | null) ?? null);
     setWarehouses((wh.data as Warehouse[] | null) ?? []);
+    setAutoSettings(au.error ? null : ((au.data as Auto | null) ?? null));
+    setPresence(pr.error ? [] : ((pr.data as Presence[] | null) ?? []));
     setLoaded(true);
   }, []);
 
@@ -231,6 +240,7 @@ function Riders() {
       </section>
 
       <WarehouseList items={warehouses} canEdit={isAdmin} onChanged={() => void load()} />
+      <AutoAssign settings={autoSettings} presence={presence} riders={riders} deliveries={deliveries} canEdit={isAdmin} onSaved={() => void load()} />
       <Rules settings={settings} canEdit={isAdmin} onSaved={() => void load()} />
 
       <AddRiderSheet open={addOpen} onClose={() => setAddOpen(false)} onAdded={() => void load()} existing={new Set(riders.map((r) => r.id))} />
@@ -430,6 +440,110 @@ function WarehouseSheet({ warehouse, onClose, onSaved }: { warehouse: Warehouse 
       </div>
       {map && <MapPicker title={`Where is ${f.name.trim() || "the warehouse"}?`} initial={lat !== null && lng !== null && !badPin ? { lat, lng } : null} onClose={() => setMap(false)} onPick={(p) => { setPin(p); if (p.label && f.address.trim() === "") setF((x) => ({ ...x, address: p.label ?? "" })); setMap(false); }} />}
     </AdminSheet>
+  );
+}
+
+// ---------- auto-assign: offer new orders to the nearest free rider ----------
+
+const ago = (iso: string | null): string => {
+  if (!iso) return "never";
+  const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  return s < 60 ? `${s} s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : `${Math.round(s / 3600)} h ago`;
+};
+
+function AutoAssign({ settings, presence, riders, deliveries, canEdit, onSaved }: { settings: Auto | null; presence: Presence[]; riders: Rider[]; deliveries: Dlv[]; canEdit: boolean; onSaved: () => void }) {
+  const [form, setForm] = useState({ radius: "5", seconds: "60", tries: "3" });
+  const [busy, setBusy] = useState(false);
+  const edited = useRef(false);
+  useEffect(() => {
+    if (!settings || edited.current) return;
+    setForm({ radius: String(settings.auto_radius_km), seconds: String(settings.offer_seconds), tries: String(settings.auto_max_offers) });
+  }, [settings]);
+  if (!settings) return null;
+
+  const radius = Number(form.radius), seconds = Number(form.seconds), tries = Number(form.tries);
+  const bad = !(radius >= 0.5 && radius <= 100) || !Number.isInteger(seconds) || seconds < 15 || seconds > 300 || !Number.isInteger(tries) || tries < 1 || tries > 10;
+  const save = async (patch: Partial<{ auto_assign: boolean }> = {}) => {
+    if (bad) return;
+    setBusy(true);
+    const { error } = await supabase.from("delivery_settings").update({ auto_radius_km: radius, offer_seconds: seconds, auto_max_offers: tries, ...patch, updated_at: new Date().toISOString() }).eq("id", 1);
+    setBusy(false);
+    if (error) toast.error(error.message);
+    else {
+      toast.success(patch.auto_assign === undefined ? "Saved." : patch.auto_assign ? "Auto-assign is on." : "Auto-assign is off.");
+      edited.current = false;
+      onSaved();
+    }
+  };
+  const input = (id: string, label: string, key: "radius" | "seconds" | "tries", unit: string) => (
+    <div className="grid gap-1.5">
+      <label htmlFor={id} className="text-sm text-muted-foreground">
+        {label}
+      </label>
+      <div className="flex items-center gap-2">
+        <input id={id} className={cn(field, "w-28")} inputMode="decimal" value={form[key]} disabled={!canEdit} onChange={(e) => { edited.current = true; setForm({ ...form, [key]: e.target.value }); }} />
+        <span className="text-sm text-muted-foreground">{unit}</span>
+      </div>
+    </div>
+  );
+  const busyRiders = new Set(deliveries.filter((d) => d.status === "assigned" || d.status === "picked_up").map((d) => d.rider_id));
+  const online = presence.filter((p) => p.online);
+  const nameOf = (id: string) => { const r = riders.find((x) => x.id === id); return r ? `${r.first_name} ${r.last_name}`.trim() : "A rider"; };
+  const fresh = (p: Presence) => p.located_at !== null && Date.now() - new Date(p.located_at).getTime() < 180_000;
+
+  return (
+    <section aria-label="Auto-assign" className="mt-8 rounded-2xl border border-[#262626] bg-card p-4 sm:p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-base font-medium">Auto-assign</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            When an order is ready it is offered to the nearest rider who is online and has nothing on their hands, close enough to the warehouse. They have a short time to accept. If they say no, or miss it, the next nearest is offered it. After a few tries it waits in the Available list for any rider, as it does today.
+          </p>
+        </div>
+        {canEdit && (
+          <button type="button" role="switch" aria-checked={settings.auto_assign} aria-label="Auto-assign" disabled={busy || bad} onClick={() => void save({ auto_assign: !settings.auto_assign })} className={cn("flex min-h-11 shrink-0 items-center gap-2 rounded-full border px-4 text-sm font-medium transition-colors disabled:opacity-60", settings.auto_assign ? "border-primary/60 bg-primary/15 text-primary" : "border-[#262626] text-muted-foreground")}>
+            <span aria-hidden className={cn("size-2.5 rounded-full", settings.auto_assign ? "bg-primary" : "bg-muted-foreground/60")} />
+            {settings.auto_assign ? "On" : "Off"}
+          </button>
+        )}
+      </div>
+      {!canEdit && <p className="mt-3 text-sm text-muted-foreground">Auto-assign is {settings.auto_assign ? "on" : "off"}. Only an admin can change it.</p>}
+
+      <div className="mt-4 grid gap-4 sm:grid-cols-3">
+        {input("auto-radius", "Riders must be within", "radius", "km of the warehouse")}
+        {input("auto-seconds", "Time to accept", "seconds", "seconds")}
+        {input("auto-tries", "Riders to try", "tries", "before it is open to everyone")}
+      </div>
+      {bad && (
+        <p role="alert" className="mt-3 text-sm text-destructive">
+          Distance: 0.5 to 100 km. Time to accept: 15 to 300 seconds. Riders to try: 1 to 10.
+        </p>
+      )}
+      {canEdit && (
+        <div className="mt-4 flex justify-end">
+          <button type="button" className={btn.primary} disabled={bad || busy} onClick={() => void save()}>
+            {busy ? "Saving…" : "Save"}
+          </button>
+        </div>
+      )}
+
+      <h3 className="mt-6 text-sm font-medium">Online now</h3>
+      {online.length === 0 ? (
+        <p className="mt-1 text-sm text-muted-foreground">No rider is online. A rider goes online with the switch at the top of their screen, and must keep the app open: a locked phone cannot be offered orders.</p>
+      ) : (
+        <ul className="mt-2 grid gap-2" aria-label="Riders online">
+          {online.map((p) => (
+            <li key={p.rider_id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#262626] px-3 py-2 text-sm">
+              <span className="font-medium">{nameOf(p.rider_id)}</span>
+              <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
+                <span className={busyRiders.has(p.rider_id) ? "text-warning" : "text-success"}>{busyRiders.has(p.rider_id) ? "Busy" : "Free"}</span>
+                <span className={fresh(p) ? undefined : "text-warning"}>{fresh(p) ? `Location ${ago(p.located_at)}` : p.located_at ? `Location lost (${ago(p.located_at)})` : "No location"}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

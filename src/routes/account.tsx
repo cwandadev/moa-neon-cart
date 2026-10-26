@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { useAuth, type Role } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { AccountSettings } from "@/components/account/AccountSettings";
+import { ProfilePhotoCard } from "@/components/shop/AvatarEditor";
 import { money } from "@/lib/products";
 
 export const Route = createFileRoute("/account")({
@@ -131,6 +132,7 @@ function Account() {
         </div>
 
         <div className="mt-6 grid gap-4">
+          <ProfilePhotoCard />
           <AccountSettings />
           <section className="rounded-2xl border border-border bg-card/60 p-5">
             <h2 className="font-display text-sm font-medium tracking-tight">Change password</h2>

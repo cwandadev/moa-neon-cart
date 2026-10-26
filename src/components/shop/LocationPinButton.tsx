@@ -92,7 +92,7 @@ export function LocationPinButton({
             <i aria-hidden className={cn("bx text-xl", busy ? "bx-loader-alt animate-spin" : "bx-current-location")} />
             {busy ? "Finding you…" : "Use my current location"}
           </button>
-          <button type="button" disabled={disabled} onClick={() => setMap(true)} className={cn(btn, failure ? "border-white bg-white text-black" : "border-border bg-transparent hover:bg-secondary")}>
+          <button type="button" disabled={disabled} onClick={() => setMap(true)} className={cn(btn, failure ? "border-primary bg-primary text-primary-foreground hover:opacity-90" : "border-border bg-transparent hover:bg-secondary")}>
             <i aria-hidden className="bx bx-map-pin text-xl" /> Choose on the map
           </button>
         </div>

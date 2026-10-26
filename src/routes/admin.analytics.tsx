@@ -249,6 +249,18 @@ function SalesTab({ range, compare, isAdmin }: TabProps) {
         <ChartCard title="Orders by status">
           <Donut items={statusItems} format={num} centerValue={<AnimatedNumber n={t.orders} format={num} />} centerLabel="orders" summary={`Orders by status: ${statusItems.map((s) => `${s.name} ${s.value}`).join(", ")}.`} />
         </ChartCard>
+        {withMoney && (
+          <ChartCard title="Orders" hint={compare ? "The dashed line is the period before." : undefined} className="xl:col-span-2">
+            <Trend
+              rows={data.series.map((s) => ({ t: s.t, v: s.orders }))}
+              series={[{ key: "v", label: "Orders" }]}
+              prev={prev?.series.map((s) => s.orders)}
+              grain={grain}
+              format={(n) => num(n)}
+              summary={`Orders over time: ${num(t.orders)} in total.`}
+            />
+          </ChartCard>
+        )}
         <ChartCard title="From order to delivery" hint="How many orders carried on to the next step.">
           <Funnel stages={[{ label: "Orders placed", value: data.funnel.placed }, { label: "Paid", value: data.funnel.paid }, { label: "Delivered", value: data.funnel.delivered }]} />
         </ChartCard>

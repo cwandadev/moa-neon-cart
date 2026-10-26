@@ -2,9 +2,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { BarList } from "@/components/admin/charts";
+import { CustomRangeSheet } from "@/components/admin/CustomRangeSheet";
 import { btn, FilterTabs, type TabItem } from "@/components/admin/controls";
 import { EmptyState, Kpi, PageHead, Panel, Skeleton } from "@/components/moa/ui";
 import { ago, csvSafe, downloadText, toCsv } from "@/lib/adminTools";
+import { daysIn, rangeText, thisMonth, type Range } from "@/lib/analytics";
 import { useAuth } from "@/lib/auth";
 import { usePersistedState } from "@/lib/persist";
 import { money } from "@/lib/products";
@@ -38,7 +40,9 @@ type PaidOrder = {
   order_items: Line[];
 };
 type Unpaid = { id: string; code: string; customer_name: string; total: number; created_at: string };
-type Period = "7" | "30" | "90" | "all";
+type Period = "7" | "30" | "90" | "all" | "custom";
+/** The Kigali calendar day (YYYY-MM-DD) an instant falls on: the same days the Analytics page counts. */
+const kigaliDay = (iso: string) => new Date(iso).toLocaleDateString("en-CA", { timeZone: "Africa/Kigali" });
 const DAY = 24 * 60 * 60 * 1000;
 
 const unitCost = (l: Line) => {
@@ -57,6 +61,8 @@ function Finance() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [period, setPeriod] = usePersistedState<Period>("moa:finance:period", "30");
+  const [range, setRange] = usePersistedState<Range>("moa:finance:range", thisMonth());
+  const [picking, setPicking] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -103,9 +109,15 @@ function Finance() {
 
   const inPeriod = useMemo(() => {
     if (period === "all") return paid;
+    if (period === "custom") return paid.filter((o) => {
+      const day = kigaliDay(paidWhen(o));
+      return day >= range.from && day <= range.to;
+    });
     const edge = Date.now() - Number(period) * DAY;
     return paid.filter((o) => new Date(paidWhen(o)).getTime() >= edge);
-  }, [paid, period]);
+  }, [paid, period, range]);
+  // Only the latest 1,000 payments are loaded: say so when a custom range reaches further back than that.
+  const cutOff = period === "custom" && paid.length >= 1000 && kigaliDay(paidWhen(paid[paid.length - 1]!)) > range.from;
 
   const { revenue, cogs, categories } = useMemo(() => {
     let r = 0;
@@ -157,6 +169,7 @@ function Finance() {
     { key: "30", label: "30 days" },
     { key: "90", label: "90 days" },
     { key: "all", label: "All time" },
+    { key: "custom", label: period === "custom" ? rangeText(range) : "Custom" },
   ];
 
   return (
@@ -171,7 +184,23 @@ function Finance() {
         }
       />
 
-      <FilterTabs items={tabs} value={period} onChange={setPeriod} label="Period" />
+      <FilterTabs items={tabs} value={period} onChange={(p) => (p === "custom" ? setPicking(true) : setPeriod(p))} label="Period" />
+      {period === "custom" && (
+        <p className="mt-2 text-sm text-muted-foreground">
+          {rangeText(range)} · {daysIn(range)} day{daysIn(range) === 1 ? "" : "s"}
+          {cutOff && <span className="text-warning"> · Only the latest 1,000 payments are loaded, so the start of this range may be missing.</span>}
+        </p>
+      )}
+      <CustomRangeSheet
+        open={picking}
+        onClose={() => setPicking(false)}
+        initial={range}
+        onApply={(r) => {
+          setRange(r);
+          setPeriod("custom");
+          setPicking(false);
+        }}
+      />
 
       {error && (
         <div className="mt-4 rounded-2xl border border-destructive/40 bg-destructive/10 p-4 text-sm">
