@@ -264,24 +264,24 @@
 .moa-admin ::-webkit-scrollbar { width: 8px; height: 8px; }
 .moa-admin ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
 
-/* The main buttons are a gradient from the brand cyan to a deeper teal, not a flat fill. It applies to real buttons and links that carry the
-   solid primary background (bg-primary): the shared Button, checkout, pay, and the rider and map buttons. Badges, dots and bars are not
-   buttons, so they stay flat; a switch keeps its own look; and the admin console keeps its own (white) buttons. The text on them is dark,
-   and stays at least 5.7 to 1 against even the deepest end. */
+/* The main buttons are a solid brand green, #05987e (not a gradient, and not the bright cyan used elsewhere). It applies to real buttons and links
+   that carry the solid primary background (bg-primary): the shared Button, checkout, pay, and the rider, map and review buttons. Badges, dots and
+   bars are not buttons, so they stay as they are; a switch keeps its own look; and the admin console keeps its own (white) buttons. The text on
+   them stays dark, which reads at 5.2 to 1 on this green (white would be only 3.6 to 1). */
 button.bg-primary:not([role="switch"]),
 a.bg-primary,
 [role="button"].bg-primary {
-  background-image: linear-gradient(135deg, var(--primary) 0%, #0f9e88 100%);
+  background-color: #05987e;
 }
 button.bg-primary:not([role="switch"]):not(:disabled):hover,
 a.bg-primary:hover,
 [role="button"].bg-primary:hover {
-  filter: brightness(1.07) saturate(1.05);
+  filter: brightness(1.1);
 }
 button.bg-primary:not([role="switch"]):not(:disabled):active,
 a.bg-primary:active,
 [role="button"].bg-primary:active {
-  filter: brightness(0.95);
+  filter: brightness(0.92);
 }
 .moa-admin button.bg-primary,
 .moa-admin a.bg-primary,
@@ -289,7 +289,7 @@ a.bg-primary:active,
 .moa-admin-dialog button.bg-primary,
 .moa-admin-dialog a.bg-primary,
 .moa-admin-dialog [role="button"].bg-primary {
-  background-image: none;
+  background-color: var(--primary);
   filter: none;
 }
 

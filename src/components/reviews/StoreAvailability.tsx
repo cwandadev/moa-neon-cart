@@ -3,9 +3,9 @@ import { nameList, type Store } from "@/lib/reviews";
 import { supabase } from "@/lib/supabase";
 
 /**
- * "Ships from MOA Mart Kigali": which of the shop's stores have this product (or this size) in stock. To a customer these are stores, never
- * warehouses, and no quantities or addresses are shown. With several, we say we send it from the nearest to them. Nothing is shown when
- * there is none (the page already says it is out of stock) or when the database does not have the feature yet.
+ * Which store the product is sent from, shown the way Google Play shows who made an app: a round icon, the NAME in the brand colour, and one plain
+ * line under it saying what that means for the shopper. To a customer these are stores, never warehouses, and no quantities or addresses are shown.
+ * Nothing is shown when no store has it (the page already says it is out of stock) or when the database does not have the feature yet.
  */
 export function StoreAvailability({ productId, variantId }: { productId: string; variantId?: string | null | undefined }) {
   const [stores, setStores] = useState<Store[]>([]);
@@ -20,21 +20,18 @@ export function StoreAvailability({ productId, variantId }: { productId: string;
     };
   }, [productId, variantId]);
   if (stores.length === 0) return null;
-  const names = stores.map((s) => s.name);
+  const one = stores.length === 1;
   return (
-    <p className="mt-2 flex items-start gap-2 font-body text-sm text-muted-foreground" data-stores>
-      <i aria-hidden className="bx bx-store-alt mt-0.5 text-lg text-foreground/70" />
-      <span>
-        {stores.length === 1 ? (
-          <>
-            Ships from <strong className="font-semibold text-foreground">{names[0]}</strong>
-          </>
-        ) : (
-          <>
-            Ships from the nearest of our stores: <strong className="font-semibold text-foreground">{nameList(names)}</strong>
-          </>
-        )}
+    <div className="mt-3 flex items-center gap-3" data-stores aria-label="Where your order is sent from" role="group">
+      <span aria-hidden className="grid size-10 shrink-0 place-items-center rounded-full bg-secondary text-foreground">
+        <i className="bx bx-store-alt text-xl" />
       </span>
-    </p>
+      <div className="min-w-0">
+        <p className="truncate font-body text-sm font-semibold text-primary" data-store-name>
+          {one ? stores[0]!.name : nameList(stores.map((s) => s.name))}
+        </p>
+        <p className="font-body text-xs text-muted-foreground">{one ? "Your order is sent from this store" : `In stock at ${stores.length} stores. Your order is sent from the nearest`}</p>
+      </div>
+    </div>
   );
 }

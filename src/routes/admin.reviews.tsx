@@ -180,10 +180,7 @@ function ReviewCard({ r, onChanged, onHide }: { r: Row; onChanged: () => void; o
     <article aria-label={`Review of ${r.product_name} by ${r.name}, ${r.rating} out of 5`} className={cn("rounded-2xl border bg-card/60 p-4 md:p-5", r.status === "hidden" ? "border-[#262626] opacity-80" : "border-[#262626]")}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <Stars value={r.rating} />
-            {r.title && <h3 className="font-display text-base font-semibold">{r.title}</h3>}
-          </div>
+          <Stars value={r.rating} />
           <p className="mt-1 text-sm text-muted-foreground">
             <a href={`/product/${encodeURIComponent(r.product_id)}#reviews`} target="_blank" rel="noreferrer" className="text-foreground underline underline-offset-4">
               {r.product_name}
