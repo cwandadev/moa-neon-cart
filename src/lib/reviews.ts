@@ -18,10 +18,13 @@ export type Review = {
   reply_at: string | null;
   mine: boolean;
   voted: boolean;
+  /** Where the reviewer's own profile photo is kept, and the photo from their Google account: the same two their account shows. Either can be missing. */
+  avatar_path?: string | null;
+  google_photo?: string | null;
 };
 export type MyReview = Review & { status: "published" | "hidden"; hidden_reason: string | null };
 export type Eligibility = { signed_in: boolean; can_review: boolean; has_reviewed: boolean; reason: "not_signed_in" | "not_delivered" | null };
-export type Store = { id: string; name: string };
+export type Store = { id: string; name: string; logo_path?: string | null };
 
 export const RATING_WORDS = ["", "Poor", "Fair", "Good", "Very good", "Excellent"] as const;
 export const REPORT_REASONS = [
@@ -40,10 +43,20 @@ export const HIDDEN_WHY: Record<string, string> = {
   suspected_fake: "we could not confirm it was a genuine review",
 };
 
-/** The letter in a reviewer's circle, and a calm colour for it that is always the same for the same name (like the avatars on Google Play). */
-export const initialOf = (name: string) => (name.trim()[0] ?? "?").toUpperCase();
-export const hueOf = (name: string) => [...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
-
+/**
+ * The reviewer's picture, exactly as their own profile shows it: the photo they added, else the one from their Google account, else their initials.
+ * The reviews carry a first name and a last initial ("Keter M."), which is also what the initials are made from.
+ */
+export function reviewerOf(r: Pick<Review, "name" | "avatar_path" | "google_photo">) {
+  const [first = "", ...rest] = r.name.split(" ");
+  const last = rest.join(" ").replace(/\./g, "");
+  return {
+    avatarUrl: r.avatar_path ? supabase.storage.from("avatars").getPublicUrl(r.avatar_path).data.publicUrl : null,
+    googlePhoto: r.google_photo ?? null,
+    firstName: first,
+    lastName: last,
+  };
+}
 export const formatDate = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 export const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 export const nameList = (names: string[]) => (names.length <= 1 ? (names[0] ?? "") : names.length === 2 ? `${names[0]} and ${names[1]}` : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`);
