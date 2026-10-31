@@ -40,6 +40,10 @@ export const HIDDEN_WHY: Record<string, string> = {
   suspected_fake: "we could not confirm it was a genuine review",
 };
 
+/** The letter in a reviewer's circle, and a calm colour for it that is always the same for the same name (like the avatars on Google Play). */
+export const initialOf = (name: string) => (name.trim()[0] ?? "?").toUpperCase();
+export const hueOf = (name: string) => [...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
+
 export const formatDate = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 export const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 export const nameList = (names: string[]) => (names.length <= 1 ? (names[0] ?? "") : names.length === 2 ? `${names[0]} and ${names[1]}` : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`);
