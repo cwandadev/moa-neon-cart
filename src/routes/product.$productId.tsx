@@ -4,6 +4,9 @@ import { toast } from "sonner";
 import { CheckoutDialog } from "@/components/shop/CheckoutDialog";
 import { Header } from "@/components/shop/Header";
 import { OptionGroup } from "@/components/shop/OptionPicker";
+import { RatingBadge } from "@/components/reviews/RatingBadge";
+import { ReviewsSection } from "@/components/reviews/ReviewsSection";
+import { StoreAvailability } from "@/components/reviews/StoreAvailability";
 import { ProductCard } from "@/components/shop/ProductCard";
 import { Button } from "@/components/ui/button";
 import { fetchProduct, rowToProduct, type ProductRow } from "@/lib/catalog";
@@ -382,6 +385,7 @@ function ProductView({ product }: { product: Product }) {
             <h1 className="mt-1 font-display text-xl font-semibold leading-tight md:text-2xl lg:text-[1.75rem]">
               {product.name}
             </h1>
+            <RatingBadge productId={product.id} />
             {product.blurb && <p className="mt-2 font-body text-sm text-muted-foreground">{product.blurb}</p>}
 
             <div className="mt-4 flex flex-wrap items-baseline gap-3">
@@ -394,6 +398,7 @@ function ProductView({ product }: { product: Product }) {
               <span className="size-2 rounded-full bg-current" />
               {status.text}
             </p>
+            <StoreAvailability productId={product.id} variantId={selected?.id ?? null} />
 
             {hasOptions && (
               <div ref={optionsRef} className="mt-5 grid gap-4 md:mt-6 md:gap-5">
@@ -555,6 +560,10 @@ function ProductView({ product }: { product: Product }) {
               </DetailBlock>
             )}
           </div>
+        </div>
+
+        <div className="mt-12 border-t border-border pt-8 md:mt-14 md:pt-10">
+          <ReviewsSection productId={product.id} productName={product.name} />
         </div>
 
         {related.length > 0 && (

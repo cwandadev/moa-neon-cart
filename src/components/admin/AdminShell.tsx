@@ -15,6 +15,7 @@ type Route =
   | "/admin/products"
   | "/admin/inventory"
   | "/admin/help"
+  | "/admin/reviews"
   | "/admin/riders"
   | "/admin/analytics"
   | "/admin/finance"
@@ -39,6 +40,7 @@ const NAV: NavItem[] = [
   { to: "/admin/products", label: "Products", icon: "bx-package", exact: false, adminOnly: false, alert: null, group: "Operations", tab: true },
   { to: "/admin/inventory", label: "Inventory", icon: "bx-box", exact: false, adminOnly: false, alert: "inventory", group: "Operations", tab: false },
   { to: "/admin/riders", label: "Riders", icon: "bx-cycling", exact: false, adminOnly: false, alert: null, group: "Operations", tab: false },
+  { to: "/admin/reviews", label: "Reviews", icon: "bx-star", exact: false, adminOnly: false, alert: null, group: "Operations", tab: false },
   { to: "/admin/help", label: "Help", icon: "bx-help-circle", exact: false, adminOnly: false, alert: null, group: "Operations", tab: false },
   { to: "/admin/analytics", label: "Analytics", icon: "bx-line-chart", exact: false, adminOnly: false, alert: null, group: "Insight", tab: false },
   { to: "/admin/finance", label: "Finance", icon: "bx-wallet", exact: false, adminOnly: true, alert: null, group: "Insight", tab: false },
