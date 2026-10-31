@@ -39,11 +39,14 @@ type OrderRow = {
   fulfilment_status: string;
   refund_status: string;
   cancel_reason: string | null;
-  order_items: { name: string; variant_label: string | null; image: string; qty: number; price: number }[];
+  order_items: { product_id: string | null; name: string; variant_label: string | null; image: string; qty: number; price: number }[];
 };
 
+// Where a review is written: the product's own page. (Cast so a project whose route list is older still type-checks.)
+const PRODUCT_PAGE = "/product/$productId" as never;
+
 const COLS =
-  "id, code, created_at, customer_name, phone, location, preferred_time, notes, subtotal, total, payment_status, fulfilment_status, refund_status, cancel_reason, order_items(name, variant_label, image, qty, price)";
+  "id, code, created_at, customer_name, phone, location, preferred_time, notes, subtotal, total, payment_status, fulfilment_status, refund_status, cancel_reason, order_items(product_id, name, variant_label, image, qty, price)";
 
 const STEPS: [string, string][] = [
   ["pending", "Order placed"],
@@ -332,6 +335,27 @@ function OrderTracking() {
             <span className="text-primary">{money(order.total)}</span>
           </div>
         </section>
+
+        {order.fulfilment_status === "delivered" && order.order_items.some((it) => it.product_id) && (
+          <section aria-label="Review your items" className="mt-4 rounded-2xl border border-border bg-card/60 p-5">
+            <h2 className="font-display text-sm font-medium tracking-tight">How did it go?</h2>
+            <p className="mt-1 font-body text-sm text-muted-foreground">Tell other shoppers what you think of what you received. It helps them choose.</p>
+            <ul className="mt-3 flex flex-col gap-2">
+              {order.order_items
+                .filter((it, i, all) => it.product_id && all.findIndex((x) => x.product_id === it.product_id) === i)
+                .map((it) => (
+                  <li key={it.product_id}>
+                    <Link to={PRODUCT_PAGE} params={{ productId: it.product_id } as never} hash="reviews" className="flex min-h-12 items-center justify-between gap-3 rounded-xl border border-border px-3 font-body text-sm transition-colors hover:bg-secondary">
+                      <span className="truncate">{it.name}</span>
+                      <span className="shrink-0 text-primary">
+                        Write a review <i aria-hidden className="bx bx-chevron-right align-middle text-lg" />
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+            </ul>
+          </section>
+        )}
 
         <section className="mt-4 rounded-2xl border border-border bg-card/60 p-5 font-body text-sm">
           <h2 className="font-display text-sm font-medium tracking-tight">Delivery details</h2>
