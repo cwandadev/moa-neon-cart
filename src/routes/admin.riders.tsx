@@ -10,6 +10,7 @@ import { useAuth } from "@/lib/auth";
 import { MapPicker } from "@/components/MapPicker";
 import { failLabel, mapLink, telLink } from "@/lib/delivery";
 import { GEO_HELP, locate } from "@/lib/geo";
+import { logoUrlOf, removeStoreLogo, uploadStoreLogo } from "@/lib/storeLogo";
 import { timeAgo } from "@/lib/notifications";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -67,6 +68,7 @@ function Riders() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [autoSettings, setAutoSettings] = useState<Auto | null>(null);
   const [stockBy, setStockBy] = useState<Record<string, number>>({});
+  const [logos, setLogos] = useState<Record<string, string | null>>({});
   const [splitPolicy, setSplitPolicy] = useState<"transfer" | "decline" | null>(null);
   const [presence, setPresence] = useState<Presence[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
@@ -75,7 +77,7 @@ function Riders() {
   const [addOpen, setAddOpen] = useState(false);
 
   const load = useCallback(async () => {
-    const [r, d, w, s, wh, au, pr, ws, sp] = await Promise.all([
+    const [r, d, w, s, wh, au, pr, ws, sp, lg] = await Promise.all([
       supabase.from("profiles").select("id, first_name, last_name, phone").eq("role", "rider").order("first_name"),
       supabase.from("deliveries").select("order_id, rider_id, status, assigned_at, delivered_at, failed_at, failed_reason, proof_flag, verified_by, needs_review, orders(code)").order("assigned_at", { ascending: false }).limit(300),
       supabase.rpc("rider_available_orders"),
@@ -87,6 +89,8 @@ function Riders() {
       // These need migration 000023: without it the page simply does not show stock or the setting below.
       supabase.from("warehouse_stock").select("warehouse_id, qty").limit(5000),
       supabase.from("delivery_settings").select("split_policy").eq("id", 1).maybeSingle(),
+      // Needs migration 000025: without it the stores simply show the store icon, and the form has no logo to change.
+      supabase.from("warehouses").select("id, logo_path").is("archived_at", null),
     ]);
     if (r.error || d.error || wh.error) {
       const msg = (r.error ?? d.error ?? wh.error)?.message ?? "";
@@ -105,6 +109,9 @@ function Riders() {
     const by: Record<string, number> = {};
     for (const x of ws.error ? [] : ((ws.data as Array<{ warehouse_id: string; qty: number }> | null) ?? [])) by[x.warehouse_id] = (by[x.warehouse_id] ?? 0) + x.qty;
     setStockBy(by);
+    const lm: Record<string, string | null> = {};
+    for (const x of lg.error ? [] : ((lg.data as Array<{ id: string; logo_path: string | null }> | null) ?? [])) lm[x.id] = x.logo_path;
+    setLogos(lm);
     setSplitPolicy(sp.error ? null : ((sp.data as { split_policy?: "transfer" | "decline" } | null)?.split_policy ?? null));
     setLoaded(true);
   }, []);
@@ -248,7 +255,7 @@ function Riders() {
         )}
       </section>
 
-      <WarehouseList items={warehouses} stock={stockBy} policy={splitPolicy} canEdit={isAdmin} onChanged={() => void load()} />
+      <WarehouseList items={warehouses} stock={stockBy} logos={logos} policy={splitPolicy} canEdit={isAdmin} onChanged={() => void load()} />
       <AutoAssign settings={autoSettings} presence={presence} riders={riders} deliveries={deliveries} canEdit={isAdmin} onSaved={() => void load()} />
       <Rules settings={settings} canEdit={isAdmin} onSaved={() => void load()} />
 
@@ -259,7 +266,7 @@ function Riders() {
 
 // ---------- warehouses: where riders collect orders ----------
 
-function WarehouseList({ items, stock, policy, canEdit, onChanged }: { items: Warehouse[]; stock: Record<string, number>; policy: "transfer" | "decline" | null; canEdit: boolean; onChanged: () => void }) {
+function WarehouseList({ items, stock, logos, policy, canEdit, onChanged }: { items: Warehouse[]; stock: Record<string, number>; logos: Record<string, string | null>; policy: "transfer" | "decline" | null; canEdit: boolean; onChanged: () => void }) {
   const [editing, setEditing] = useState<Warehouse | "new" | null>(null);
   const [removing, setRemoving] = useState<Warehouse | null>(null);
 
@@ -300,6 +307,7 @@ function WarehouseList({ items, stock, policy, canEdit, onChanged }: { items: Wa
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="flex flex-wrap items-center gap-2 text-base font-medium">
+                    <StoreMark path={logos[w.id]} size={28} />
                     {w.name}
                     {w.is_default && <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs font-normal">Default</span>}
                     {!w.active && <span className="rounded-full bg-warning/15 px-2 py-0.5 text-xs font-normal text-warning">Closed</span>}
@@ -328,7 +336,7 @@ function WarehouseList({ items, stock, policy, canEdit, onChanged }: { items: Wa
         })}
       </ul>
       {policy !== null && items.length > 1 && <SplitPolicy value={policy} canEdit={canEdit} onSaved={onChanged} />}
-      {editing && <WarehouseSheet warehouse={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSaved={onChanged} />}
+      {editing && <WarehouseSheet warehouse={editing === "new" ? null : editing} logoPath={editing === "new" ? null : (logos[editing.id] ?? null)} onClose={() => setEditing(null)} onSaved={onChanged} />}
       {removing && <RemoveWarehouse warehouse={removing} onClose={() => setRemoving(null)} onDone={() => { setRemoving(null); onChanged(); }} />}
     </section>
   );
@@ -410,7 +418,83 @@ function SplitPolicy({ value, canEdit, onSaved }: { value: "transfer" | "decline
   );
 }
 
-function WarehouseSheet({ warehouse, onClose, onSaved }: { warehouse: Warehouse | null; onClose: () => void; onSaved: () => void }) {
+/** A store's round picture: its logo, or a store icon until it has one. */
+function StoreMark({ path, size = 40 }: { path: string | null | undefined; size?: number }) {
+  const url = logoUrlOf(path);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [url]);
+  return (
+    <span aria-hidden className="grid shrink-0 place-items-center overflow-hidden rounded-full bg-white/10 text-muted-foreground" style={{ width: size, height: size }}>
+      {url && !failed ? <img src={url} alt="" data-store-logo draggable={false} onError={() => setFailed(true)} className="size-full object-cover" /> : <i className="bx bx-store-alt" style={{ fontSize: Math.round(size * 0.55) }} />}
+    </span>
+  );
+}
+
+/** Choose or remove a store's logo. It is saved at once, on its own, so the rest of the form does not have to be saved for it. */
+function LogoField({ warehouse, logoPath, onSaved }: { warehouse: Warehouse; logoPath: string | null; onSaved: () => void }) {
+  const [path, setPath] = useState<string | null>(logoPath);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const picker = useRef<HTMLInputElement>(null);
+  const choose = async (file: File | undefined) => {
+    if (!file) return;
+    setBusy(true);
+    setError("");
+    try {
+      setPath(await uploadStoreLogo(warehouse.id, file, path));
+      toast.success("Logo saved.");
+      onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "The logo could not be saved.");
+    } finally {
+      setBusy(false);
+      if (picker.current) picker.current.value = "";
+    }
+  };
+  const remove = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await removeStoreLogo(warehouse.id, path);
+      setPath(null);
+      toast.success("Logo removed.");
+      onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "The logo could not be removed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <fieldset className="grid gap-3">
+      <legend className="mb-1 text-sm font-medium">Logo</legend>
+      <div className="flex items-center gap-4">
+        <StoreMark path={path} size={64} />
+        <div className="grid min-w-0 gap-2">
+          <p className="text-sm text-muted-foreground">{path ? "Customers see this beside the store's name on a product page." : "No logo yet. Customers see a store icon instead."}</p>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" disabled={busy} onClick={() => picker.current?.click()} className={btn.ghost}>
+              {busy ? "Saving…" : path ? "Change logo" : "Choose a logo"}
+            </button>
+            {path && (
+              <button type="button" disabled={busy} onClick={() => void remove()} className={btn.dangerQuiet}>
+                Remove logo
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+      <input ref={picker} type="file" accept="image/png,image/jpeg,image/webp" aria-label="Logo file" className="sr-only" tabIndex={-1} onChange={(e) => void choose(e.target.files?.[0])} />
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
+    </fieldset>
+  );
+}
+
+function WarehouseSheet({ warehouse, logoPath, onClose, onSaved }: { warehouse: Warehouse | null; logoPath: string | null; onClose: () => void; onSaved: () => void }) {
   const [f, setF] = useState({
     name: warehouse?.name ?? "",
     address: warehouse?.address ?? "",
@@ -468,6 +552,8 @@ function WarehouseSheet({ warehouse, onClose, onSaved }: { warehouse: Warehouse 
         {input("wh-name", "Name", "name", { placeholder: "MOA Mart Musanze", maxLength: 60 })}
         {input("wh-address", "Address", "address", { placeholder: "KN 5 Rd, Musanze", maxLength: 200 })}
         {input("wh-phone", "Phone riders can call", "phone", { inputMode: "tel", placeholder: "07…", maxLength: 30 })}
+
+        {warehouse ? <LogoField warehouse={warehouse} logoPath={logoPath} onSaved={onSaved} /> : <p className="text-sm text-muted-foreground">Save the store first, then you can give it a logo.</p>}
 
         <fieldset className="grid gap-3 rounded-2xl border border-[#262626] p-4">
           <legend className="px-1 text-sm font-medium">Map pin (so riders can navigate here)</legend>

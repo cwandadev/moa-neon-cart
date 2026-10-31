@@ -2,9 +2,10 @@ import { Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Avatar } from "@/components/Avatar";
 import { Stars, StarInput } from "@/components/reviews/Stars";
 import { useAuth } from "@/lib/auth";
-import { formatDate, HIDDEN_WHY, hueOf, initialOf, plural, refreshReviews, REPORT_REASONS, useReviewSummary, type Eligibility, type MyReview, type Review, type Stars5 } from "@/lib/reviews";
+import { formatDate, HIDDEN_WHY, plural, refreshReviews, REPORT_REASONS, reviewerOf, useReviewSummary, type Eligibility, type MyReview, type Review, type Stars5 } from "@/lib/reviews";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 
@@ -26,14 +27,6 @@ const SORTS = [
 ] as const;
 type Sort = (typeof SORTS)[number][0];
 const field = "w-full rounded-xl border border-border bg-card px-3 font-body text-base focus:outline-none focus:ring-2 focus:ring-ring sm:text-sm";
-
-function Avatar({ name }: { name: string }) {
-  return (
-    <span aria-hidden className="grid size-9 shrink-0 place-items-center rounded-full font-display text-sm font-semibold text-white" style={{ backgroundColor: `hsl(${hueOf(name)} 45% 36%)` }}>
-      {initialOf(name)}
-    </span>
-  );
-}
 
 function Body({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
@@ -150,7 +143,7 @@ function ReviewItem({ r, caption, signedIn, onVote, onEdit, onDelete }: { r: Rev
     <article aria-label={`Review by ${r.name}, ${r.rating} out of 5`}>
       {caption && <p className="mb-2 font-body text-xs font-medium uppercase tracking-wider text-muted-foreground">{caption}</p>}
       <header className="flex items-center gap-3">
-        <Avatar name={r.name} />
+        <Avatar user={reviewerOf(r)} size={36} />
         <p className="min-w-0 flex-1 truncate font-body text-sm font-medium">{r.name}</p>
         {!r.mine && signedIn && !reported && <ReviewMenu onReport={() => setReporting(true)} />}
       </header>
@@ -245,7 +238,7 @@ function ReviewForm({ productId, productName, initial, onDone, onCancel }: { pro
     <form onSubmit={(e) => void submit(e)} aria-label={initial ? "Edit your review" : "Write a review"} className="grid gap-4">
       <div>
         <h3 className="font-display text-base font-semibold">{initial ? "Edit your review" : `Review ${productName}`}</h3>
-        <p className="mt-1 font-body text-xs text-muted-foreground">Say what you liked or did not like about the product itself. Please do not include links or personal details. Nobody is paid for a review, and a review is never hidden for being negative.</p>
+        <p className="mt-1 font-body text-xs text-muted-foreground">Say what you liked or did not like about the product itself. Please do not include links or personal details. Nobody is paid for a review, and a review is never hidden for being negative. Your first name and profile photo are shown with your review.</p>
       </div>
       <StarInput value={rating} onChange={setRating} />
       <div className="grid gap-1.5">
@@ -393,7 +386,7 @@ export function ReviewsSection({ productId, productName }: { productId: string; 
                   >
                     <span className="text-center text-muted-foreground">{n}</span>
                     <span className="h-2 overflow-hidden rounded-full bg-secondary" aria-hidden>
-                      <span data-bar className="block h-full rounded-full bg-primary" style={{ width: `${count ? (c / count) * 100 : 0}%` }} />
+                      <span data-bar className="block h-full rounded-full bg-warning" style={{ width: `${count ? (c / count) * 100 : 0}%` }} />
                     </span>
                     <span className="text-right tabular-nums text-muted-foreground">{c}</span>
                   </button>
