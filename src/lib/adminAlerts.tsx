@@ -1,7 +1,7 @@
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { toast } from "sonner";
 import { money } from "@/lib/products";
+import { popup } from "@/lib/swipeToasts";
 import { supabase } from "@/lib/supabase";
 
 export type Level = "green" | "orange" | "red";
@@ -150,7 +150,8 @@ export function useAdminAlerts(enabled: boolean): AdminAlerts {
         schedule();
         if (!live || pathRef.current.startsWith("/admin/orders") || (payload.new as { stock_reserved?: boolean }).stock_reserved) return;
         const o = payload.new as unknown as { code?: string; customer_name?: string; total?: number };
-        toast(`New order ${o.code ?? ""}`.trim(), {
+        popup(`New order ${o.code ?? ""}`.trim(), {
+          id: `new-order-${o.code ?? Date.now()}`,
           description: `${o.customer_name ?? "A customer"}${o.total ? ` · ${money(o.total)}` : ""}`,
           icon: <i className="bx bx-receipt text-xl" />,
           style: toneStyle("--warning", "#f59e0b"),
@@ -163,7 +164,7 @@ export function useAdminAlerts(enabled: boolean): AdminAlerts {
         const m = payload.new as unknown as { sender_role?: string; body?: string };
         if (!live || m.sender_role !== "client" || pathRef.current.startsWith("/admin/inbox")) return;
         const body = m.body ?? "";
-        toast("New customer message", {
+        popup("New customer message", {
           description: body.length > 80 ? `${body.slice(0, 77)}…` : body,
           icon: <i className="bx bx-conversation text-xl" />,
           style: toneStyle("--warning", "#f59e0b"),

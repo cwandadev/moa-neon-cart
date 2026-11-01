@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "@tanstack/react-router";
+import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { searchGuide, type Block, type Entry, type Guide, type Topic } from "@/lib/help";
 import { cn } from "@/lib/utils";
 
@@ -6,27 +7,71 @@ import { cn } from "@/lib/utils";
  * One of the guides (see src/lib/help.ts), as a page: a search box, shortcuts to each topic, and the answers, which open and close.
  * A link ending in #the-entry-id opens that answer and scrolls to it, so a person can be sent straight to one.
  */
+const LINK = /\[([^\]]+)\]\((\/[^)\s]*)\)/g;
+
+/**
+ * A sentence with its links. A link is written [words](/page) in the guide. It is a real anchor (so search engines can follow it and it opens in a
+ * new tab if asked to), and inside the app a plain click moves to the page without a reload.
+ */
+function Inline({ text }: { text: string }) {
+  const router = useRouter({ warn: false }) as { navigate: (o: { to: never }) => unknown } | undefined;
+  const out: Array<string | ReactElement> = [];
+  let last = 0;
+  for (const m of text.matchAll(LINK)) {
+    const [whole, label = "", path = "/"] = m;
+    out.push(text.slice(last, m.index));
+    out.push(
+      <a
+        key={`${m.index}-${path}`}
+        href={path}
+        onClick={(e) => {
+          if (!router || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+          e.preventDefault();
+          void router.navigate({ to: path as never });
+        }}
+        className="font-medium text-primary underline underline-offset-4 hover:no-underline"
+      >
+        {label}
+      </a>,
+    );
+    last = (m.index ?? 0) + whole.length;
+  }
+  out.push(text.slice(last));
+  return <>{out}</>;
+}
+
 function BlockView({ b }: { b: Block }) {
-  if ("text" in b) return <p className="font-body text-sm leading-relaxed">{b.text}</p>;
+  if ("text" in b)
+    return (
+      <p className="font-body text-sm leading-relaxed">
+        <Inline text={b.text} />
+      </p>
+    );
   if ("note" in b)
     return (
       <p className="flex items-start gap-2 rounded-xl bg-warning/10 px-3 py-2 font-body text-sm leading-relaxed text-warning">
         <i aria-hidden className="bx bx-info-circle mt-0.5 shrink-0 text-lg" />
-        <span>{b.note}</span>
+        <span>
+          <Inline text={b.note} />
+        </span>
       </p>
     );
   if ("steps" in b)
     return (
       <ol className="grid list-decimal gap-1.5 pl-5 font-body text-sm leading-relaxed marker:font-semibold marker:text-muted-foreground">
         {b.steps.map((s) => (
-          <li key={s}>{s}</li>
+          <li key={s}>
+            <Inline text={s} />
+          </li>
         ))}
       </ol>
     );
   return (
     <ul className="grid list-disc gap-1.5 pl-5 font-body text-sm leading-relaxed marker:text-muted-foreground">
       {b.bullets.map((s) => (
-        <li key={s}>{s}</li>
+        <li key={s}>
+          <Inline text={s} />
+        </li>
       ))}
     </ul>
   );
