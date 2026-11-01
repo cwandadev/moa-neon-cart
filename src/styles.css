@@ -264,33 +264,60 @@
 .moa-admin ::-webkit-scrollbar { width: 8px; height: 8px; }
 .moa-admin ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
 
-/* The main buttons are a solid brand green, #05987e (not a gradient, and not the bright cyan used elsewhere). It applies to real buttons and links
-   that carry the solid primary background (bg-primary): the shared Button, checkout, pay, and the rider, map and review buttons. Badges, dots and
-   bars are not buttons, so they stay as they are; a switch keeps its own look; and the admin console keeps its own (white) buttons. The text on
-   them stays dark, which reads at 5.2 to 1 on this green (white would be only 3.6 to 1). */
+/* The main buttons are a solid brand green, #05987e, with white text and one small, quiet shadow. It applies to real buttons and links that carry
+   the solid primary background (bg-primary): the shared Button, checkout, pay, add to cart, and the rider, map and review buttons. Badges, dots and
+   bars are not buttons, so they stay as they are; a switch keeps its own look; and the admin console keeps its own (white) buttons, with their own
+   dark text. White on this green reads at 3.6 to 1: fine for large bold text, below the 4.5 that small text is asked to have. */
 button.bg-primary:not([role="switch"]),
 a.bg-primary,
 [role="button"].bg-primary {
   background-color: #05987e;
+  color: #fff;
+}
+/* The glow around these buttons is replaced by a small, quiet shadow, the same at rest and on hover, and a hover does not lift or zoom them. A
+   keyboard user's focus ring is a shadow too, so a button that has the keyboard focus is left alone and keeps it. */
+button.bg-primary:not([role="switch"]):not(:focus-visible),
+a.bg-primary:not(:focus-visible),
+[role="button"].bg-primary:not(:focus-visible) {
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.28);
 }
 button.bg-primary:not([role="switch"]):not(:disabled):hover,
 a.bg-primary:hover,
 [role="button"].bg-primary:hover {
-  filter: brightness(1.1);
+  filter: brightness(1.05);
+  translate: none;
+  scale: none;
 }
 button.bg-primary:not([role="switch"]):not(:disabled):active,
 a.bg-primary:active,
 [role="button"].bg-primary:active {
-  filter: brightness(0.92);
+  filter: brightness(0.95);
 }
-.moa-admin button.bg-primary,
+.moa-admin button.bg-primary:not([role="switch"]),
 .moa-admin a.bg-primary,
 .moa-admin [role="button"].bg-primary,
-.moa-admin-dialog button.bg-primary,
+.moa-admin-dialog button.bg-primary:not([role="switch"]),
 .moa-admin-dialog a.bg-primary,
 .moa-admin-dialog [role="button"].bg-primary {
   background-color: var(--primary);
+  color: var(--primary-foreground);
+  box-shadow: revert-layer;
+}
+.moa-admin button.bg-primary:not([role="switch"]):not(:disabled):hover,
+.moa-admin a.bg-primary:hover,
+.moa-admin [role="button"].bg-primary:hover,
+.moa-admin button.bg-primary:not([role="switch"]):not(:disabled):active,
+.moa-admin a.bg-primary:active,
+.moa-admin [role="button"].bg-primary:active,
+.moa-admin-dialog button.bg-primary:not([role="switch"]):not(:disabled):hover,
+.moa-admin-dialog a.bg-primary:hover,
+.moa-admin-dialog [role="button"].bg-primary:hover,
+.moa-admin-dialog button.bg-primary:not([role="switch"]):not(:disabled):active,
+.moa-admin-dialog a.bg-primary:active,
+.moa-admin-dialog [role="button"].bg-primary:active {
   filter: none;
+  translate: revert-layer;
+  scale: revert-layer;
 }
 
 @layer utilities {
