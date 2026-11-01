@@ -2,9 +2,13 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ActionMenu, type MenuItem } from "@/components/admin/ActionMenu";
+import { CustomRangeSheet } from "@/components/admin/CustomRangeSheet";
+import { DateBar, DayHeader, DayStamps, scrollToDay, useFolds } from "@/components/admin/DayFolds";
 import { ActionBar, btn, FilterTabs, SearchField, type TabItem } from "@/components/admin/controls";
 import { EmptyState, PageHead } from "@/components/moa/ui";
 import { useLongPress } from "@/lib/adminTools";
+import { thisMonth, type Range as Days } from "@/lib/analytics";
+import { dayLabel, dayOf, inRange, rangeFor, stampOf, type DayFilter } from "@/lib/dayGroups";
 import { categoryOf, URGENCY } from "@/lib/notificationKinds";
 import { dismiss, loadMore, markAllRead, markMany, markRead, markUnread, restore, SEV, timeAgo, useNotifications, type Notif } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
@@ -19,15 +23,6 @@ type GroupBy = "day" | "type";
 const PAGE = 30;
 const PINNED_MAX = 5;
 
-const dayLabel = (iso: string): string => {
-  const d = new Date(iso);
-  const start = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
-  const diff = Math.round((start(new Date()) - start(d)) / 86_400_000);
-  if (diff <= 0) return "Today";
-  if (diff === 1) return "Yesterday";
-  return d.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
-};
-
 const isAttention = (n: Notif) => !n.read_at && (n.severity === "critical" || n.severity === "warning");
 
 function AdminNotifications() {
@@ -37,6 +32,10 @@ function AdminNotifications() {
   const [category, setCategory] = useState("all");
   const [q, setQ] = useState("");
   const [group, setGroup] = useState<GroupBy>("day");
+  const [dateFilter, setDateFilter] = useState<DayFilter>("all");
+  const [custom, setCustom] = useState<Days | null>(null);
+  const [picking, setPicking] = useState(false);
+  const folds = useFolds();
   const [visible, setVisible] = useState(PAGE);
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -47,14 +46,16 @@ function AdminNotifications() {
 
   // ----- what is shown -----
   const term = q.trim().toLowerCase();
+  const dates = useMemo(() => rangeFor(dateFilter, custom), [dateFilter, custom]);
   const pool = useMemo(
     () =>
       items.filter(
         (n) =>
           (status === "all" || (status === "unread" ? !n.read_at : isAttention(n))) &&
+          inRange(n.created_at, dates) &&
           (term === "" || `${n.title} ${n.body} ${categoryOf(n.kind).label}`.toLowerCase().includes(term)),
       ),
-    [items, status, term],
+    [items, status, term, dates],
   );
   const types = useMemo(() => {
     const m = new Map<string, { key: string; label: string; icon: string; n: number }>();
@@ -69,7 +70,7 @@ function AdminNotifications() {
   // A type with nothing left in it (everything was read, say) is no longer a filter.
   const activeType = category !== "all" && types.some((t) => t.key === category) ? category : "all";
   const shown = activeType === "all" ? pool : pool.filter((n) => categoryOf(n.kind).key === activeType);
-  const filtersOn = status !== "all" || activeType !== "all" || term !== "";
+  const filtersOn = status !== "all" || activeType !== "all" || term !== "" || dateFilter !== "all";
 
   // What needs you comes first, above the rest, until you start filtering.
   const pinned = filtersOn ? [] : shown.filter(isAttention).slice(0, PINNED_MAX);
@@ -80,19 +81,19 @@ function AdminNotifications() {
   const showType = group === "day" && activeType === "all";
 
   const groups = useMemo(() => {
-    const out: Array<{ key: string; label: string; list: Notif[] }> = [];
-    const add = (key: string, label: string, n: Notif) => {
+    const out: Array<{ key: string; label: string; stamp: string; list: Notif[] }> = [];
+    const add = (key: string, label: string, stamp: string, n: Notif) => {
       const g = out.find((x) => x.key === key);
       if (g) g.list.push(n);
-      else out.push({ key, label, list: [n] });
+      else out.push({ key, label, stamp, list: [n] });
     };
     for (const n of page) {
       if (group === "day") {
-        const l = dayLabel(n.created_at);
-        add(l, l, n);
+        const k = dayOf(n.created_at);
+        add(k, dayLabel(k), stampOf(k), n);
       } else {
         const c = categoryOf(n.kind);
-        add(c.key, c.label, n);
+        add(c.key, c.label, c.label, n);
       }
     }
     return out;
@@ -107,7 +108,13 @@ function AdminNotifications() {
     setStatus("all");
     setCategory("all");
     setQ("");
+    setDateFilter("all");
+    setCustom(null);
     reset();
+  };
+  const jump = (key: string) => {
+    folds.open(key);
+    requestAnimationFrame(() => scrollToDay(`notifs-day-${key}`));
   };
 
   // ----- selecting -----
@@ -266,6 +273,16 @@ function AdminNotifications() {
             label="Search notifications"
             placeholder="Search notifications"
           />
+          <DateBar
+            value={dateFilter}
+            custom={custom}
+            onChange={(v) => {
+              setDateFilter(v);
+              reset();
+            }}
+            onPick={() => setPicking(true)}
+            label="Notification date"
+          />
           <FilterTabs
             items={statusTabs}
             value={status}
@@ -288,6 +305,19 @@ function AdminNotifications() {
           )}
         </div>
       )}
+
+      <CustomRangeSheet
+        open={picking}
+        onClose={() => setPicking(false)}
+        initial={custom ?? thisMonth()}
+        onApply={(r) => {
+          setCustom(r);
+          setDateFilter("custom");
+          setPicking(false);
+          reset();
+        }}
+      />
+      {loaded && items.length > 0 && group === "day" && <DayStamps stamps={groups.map((g) => ({ key: g.key, stamp: g.stamp, count: g.list.length }))} onJump={jump} allFolded={groups.length > 0 && groups.every((g) => folds.isFolded(g.key))} onFoldAll={() => folds.foldAll(groups.map((g) => g.key))} onUnfoldAll={folds.unfoldAll} />}
 
       {loaded && items.length > 0 && (
         <div className="mt-4 flex min-h-9 flex-wrap items-center justify-between gap-x-4 gap-y-2 text-sm text-muted-foreground">
@@ -345,7 +375,7 @@ function AdminNotifications() {
               <EmptyState
                 icon={status === "unread" && term === "" && activeType === "all" ? "bx-check-circle" : "bx-search"}
                 title={status === "unread" && term === "" && activeType === "all" ? "You are all caught up" : "No notifications match"}
-                hint={term !== "" && hasMore ? "Older notifications that are not loaded yet may match too." : "Try another word, or clear the filters."}
+                hint={(term !== "" || dateFilter !== "all") && hasMore ? "Older notifications that are not loaded yet may match too." : "Try another word, or clear the filters."}
                 action={
                   <button type="button" className={btn.ghost} onClick={clearFilters}>
                     Clear filters
@@ -371,13 +401,24 @@ function AdminNotifications() {
             )}
             {groups.map((g) => (
               <section key={g.key} aria-label={g.label}>
-                <div className="mb-2 flex items-center justify-between gap-3">
-                  <h2 className="text-sm font-medium text-muted-foreground">
-                    {g.label} <span className="ml-1 text-xs tabular-nums">{g.list.length}</span>
-                  </h2>
-                  {sectionAction(g.list)}
+                <div className="mb-1">
+                  <DayHeader
+                    id={`notifs-day-${g.key}`}
+                    controls={`notifs-list-${g.key}`}
+                    label={g.label}
+                    count={g.list.length}
+                    noun="notification"
+                    badge={g.list.some((n) => !n.read_at) ? `${g.list.filter((n) => !n.read_at).length} new` : null}
+                    folded={folds.isFolded(g.key)}
+                    onToggle={() => folds.toggle(g.key)}
+                    trailing={sectionAction(g.list)}
+                  />
                 </div>
-                <ul className="grid gap-2 xl:grid-cols-2">{g.list.map(row)}</ul>
+                {folds.isFolded(g.key) ? null : (
+                  <ul id={`notifs-list-${g.key}`} className="grid gap-2 xl:grid-cols-2">
+                    {g.list.map(row)}
+                  </ul>
+                )}
               </section>
             ))}
             {(remaining > 0 || hasMore) && (

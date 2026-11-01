@@ -1,6 +1,6 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, useSyncExternalStore, type CSSProperties } from "react";
-import { toast } from "sonner";
+import { popup, useToastSwipe } from "@/lib/swipeToasts";
 import { supabase } from "@/lib/supabase";
 
 export type Severity = "info" | "success" | "warning" | "critical";
@@ -134,6 +134,7 @@ export function timeAgo(iso: string) {
 /** Mounted once in the root layout: loads, listens live and shows toasts. */
 export function NotificationsHost() {
   const navigate = useNavigate();
+  useToastSwipe(); // on a phone a popup can be swiped away
   const [uid, setUid] = useState<string | null>(null);
 
   useEffect(() => {
@@ -196,7 +197,8 @@ export function NotificationsHost() {
           if (n.kind === "order_new") return;
           const t = SEV[n.severity] ?? SEV.info;
           const link = n.link;
-          toast(n.title, {
+          popup(n.title, {
+            id: `notification-${n.id}`,
             description: n.body,
             icon: <i className={`bx ${t.icon} text-xl`} />,
             style: toneStyle(t),

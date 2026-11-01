@@ -1,10 +1,12 @@
 import { FunctionsHttpError } from "@supabase/supabase-js";
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ActionMenu, type MenuItem } from "@/components/admin/ActionMenu";
 import { ActionBar, btn, Detail, FilterTabs, SearchField, field, type TabItem } from "@/components/admin/controls";
 import { AdminSheet } from "@/components/admin/AdminSheet";
+import { CustomRangeSheet } from "@/components/admin/CustomRangeSheet";
+import { DateBar, DayHeader, DayStamps, scrollToDay, useFolds } from "@/components/admin/DayFolds";
 import { DeliveryPanel } from "@/components/admin/DeliveryPanel";
 import { EmptyState, PageHead, Skeleton } from "@/components/moa/ui";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -22,7 +24,9 @@ import {
   useDebouncedValue,
   useLongPress,
 } from "@/lib/adminTools";
+import { thisMonth, type Range as Days } from "@/lib/analytics";
 import { useAuth } from "@/lib/auth";
+import { dayOf, groupByDay, rangeFor, startOfDay, startOfNextDay, type DayFilter, type DayGroup } from "@/lib/dayGroups";
 import { usePersistedState } from "@/lib/persist";
 import { money } from "@/lib/products";
 import { supabase } from "@/lib/supabase";
@@ -69,19 +73,15 @@ type Row = {
 };
 
 type Tab = "confirmed" | "out_for_delivery" | "pending" | "delivered" | "cancelled" | "all";
-type Range = "all" | "today" | "7d" | "30d";
+/** Any time, Today, Yesterday, the last 7 or 30 days, or "custom": a day or a range picked on the calendar. */
+type Range = DayFilter;
+type Folds = ReturnType<typeof useFolds>;
 type Counts = Record<Tab, number>;
 
 const PAGE = 25;
 const SELECT =
   "id, code, created_at, paid_at, customer_name, phone, location, preferred_time, notes, total, payment_status, fulfilment_status, refund_status, cancel_reason, lat, lng, warehouse_id, stock_ready, order_items(name, variant_label, image, qty, price), deliveries(status, failed_reason, proof_flag, verified_by, rider:profiles!deliveries_rider_id_fkey(first_name, last_name))";
 
-const RANGES: Array<[Range, string]> = [
-  ["all", "All time"],
-  ["today", "Today"],
-  ["7d", "Last 7 days"],
-  ["30d", "Last 30 days"],
-];
 
 const REASONS = [
   "Customer asked to cancel",
@@ -169,29 +169,19 @@ async function callFn<T>(name: string, body: Record<string, unknown>): Promise<{
   return { data: data as T };
 }
 
-function sinceIso(range: Range): string | null {
-  if (range === "today") {
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    return d.toISOString();
-  }
-  if (range === "7d") return new Date(Date.now() - 7 * DAY_MS).toISOString();
-  if (range === "30d") return new Date(Date.now() - 30 * DAY_MS).toISOString();
-  return null;
-}
-
 /** Characters that have a meaning inside a database filter are turned into spaces. */
 const cleanTerm = (s: string) => s.replace(/[,()%*\\]/g, " ").trim();
 
-type Filters = { tab: Tab; range: Range; term: string };
+type Filters = { tab: Tab; range: Range; custom: Days | null; term: string };
 
 // The query builder comes from the database library; this one helper adds the filters to either query.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function withFilters(q: any, f: Filters, includeTab: boolean): any {
   let out = q.is("archived_at", null);   // removed orders are hidden here (they are kept, and still counted in Analytics and Finance)
   if (includeTab && f.tab !== "all") out = out.eq("fulfilment_status", f.tab);
-  const since = sinceIso(f.range);
-  if (since) out = out.gte("created_at", since);
+  // Days are days in Kigali, the same as Analytics and Finance, and the last day picked is included.
+  const days = rangeFor(f.range, f.custom);
+  if (days) out = out.gte("created_at", startOfDay(days.from)).lt("created_at", startOfNextDay(days.to));
   const t = cleanTerm(f.term);
   if (t) out = out.or(`code.ilike.%${t}%,customer_name.ilike.%${t}%,phone.ilike.%${t}%`);
   return out;
@@ -666,8 +656,15 @@ function OrderCard({
   );
 }
 
+/** How many orders of a day are paid and still waiting to go out: what to look at first. */
+const toDispatch = (g: DayGroup<Row>): string | null => {
+  const n = g.rows.filter((o) => o.fulfilment_status === "confirmed").length;
+  return n > 0 ? `${n} to dispatch` : null;
+};
+
 function OrderTable({
-  rows,
+  groups,
+  folds,
   h,
   selected,
   onToggle,
@@ -675,7 +672,8 @@ function OrderTable({
   allSelected,
   press,
 }: {
-  rows: Row[];
+  groups: Array<DayGroup<Row>>;
+  folds: Folds;
   h: Handlers;
   selected: Set<string>;
   onToggle: (id: string) => void;
@@ -709,7 +707,14 @@ function OrderTable({
           </tr>
         </thead>
         <tbody>
-          {rows.map((o) => {
+          {groups.map((g) => (
+            <Fragment key={g.key}>
+              <tr role="presentation" className="border-b border-[#262626]/70 bg-white/[0.02]">
+                <td role="presentation" colSpan={7} className="px-3">
+                  <DayHeader id={`orders-day-t-${g.key}`} label={g.label} count={g.rows.length} noun="order" badge={toDispatch(g)} folded={folds.isFolded(g.key)} onToggle={() => folds.toggle(g.key)} />
+                </td>
+              </tr>
+              {folds.isFolded(g.key) ? null : g.rows.map((o) => {
             const stage = stageOf(o);
             const when = whenLine(o);
             return (
@@ -762,6 +767,8 @@ function OrderTable({
               </tr>
             );
           })}
+            </Fragment>
+          ))}
         </tbody>
       </table>
     </div>
@@ -917,6 +924,9 @@ function Orders() {
   const { q: linkedSearch } = Route.useSearch();
   const [tab, setTab] = usePersistedState<Tab>("moa:orders:tab", "confirmed");
   const [range, setRange] = usePersistedState<Range>("moa:orders:range", "all");
+  const [custom, setCustom] = usePersistedState<Days | null>("moa:orders:custom", null);
+  const [picking, setPicking] = useState(false);
+  const folds = useFolds();
   const [term, setTerm] = usePersistedState("moa:orders:q", "");
   const debounced = useDebouncedValue(term);
 
@@ -953,7 +963,7 @@ function Orders() {
 
   const load = useCallback(async () => {
     const req = ++reqRef.current;
-    const f: Filters = { tab, range, term: debounced };
+    const f: Filters = { tab, range, custom, term: debounced };
     try {
       const list = withFilters(
         supabase.from("orders").select(SELECT, { count: "exact" }).order("created_at", { ascending: false }).range(0, limit - 1),
@@ -978,7 +988,7 @@ function Orders() {
     } finally {
       if (req === reqRef.current) setLoading(false);
     }
-  }, [tab, range, debounced, limit]);
+  }, [tab, range, custom, debounced, limit]);
 
   const loadRef = useRef(load);
   loadRef.current = load;
@@ -992,7 +1002,8 @@ function Orders() {
     setLimit(PAGE);
     setSelected(new Set());
     setLoading(true);
-  }, [tab, range, debounced]);
+    folds.unfoldAll();
+  }, [tab, range, custom, debounced]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // New and changed orders arrive by themselves.
   useEffect(() => {
@@ -1068,7 +1079,7 @@ function Orders() {
     try {
       const res = await withFilters(
         supabase.from("orders").select(SELECT).order("created_at", { ascending: false }).limit(5000),
-        { tab, range, term: debounced },
+        { tab, range, custom, term: debounced },
         true,
       );
       if (res.error) throw res.error;
@@ -1088,7 +1099,16 @@ function Orders() {
   const selRows = rows.filter((o) => selected.has(o.id));
   const cancellable = selRows.filter(canCancel);
   const removable = selRows.filter(canRemove);
-  const allSelected = rows.length > 0 && rows.every((o) => selected.has(o.id));
+  // Orders in a day that is folded away are out of sight, so "select all" does not reach them.
+  const groups = useMemo(() => groupByDay(rows, (o) => o.created_at), [rows]);
+  const shownRows = rows.filter((o) => !folds.isFolded(dayOf(o.created_at)));
+  const stamps = groups.map((g) => ({ key: g.key, stamp: g.stamp, count: g.rows.length }));
+  const jump = (key: string) => {
+    folds.open(key);
+    const wide = typeof window.matchMedia === "function" && window.matchMedia("(min-width: 1024px)").matches;
+    requestAnimationFrame(() => scrollToDay(`orders-day-${wide ? "t" : "m"}-${key}`));
+  };
+  const allSelected = shownRows.length > 0 && shownRows.every((o) => selected.has(o.id));
   const press = useLongPress((id) => {
     setSelectMode(true);
     setSelected(new Set([id]));
@@ -1100,7 +1120,7 @@ function Orders() {
       else next.add(id);
       return next;
     });
-  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(rows.map((o) => o.id)));
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(shownRows.map((o) => o.id)));
 
   const open = (o: Row) => {
     lastSheetRow.current = o;
@@ -1164,28 +1184,26 @@ function Orders() {
       />
 
       <div className="grid gap-3">
-        <div className="flex flex-col gap-3 sm:flex-row">
-          <SearchField value={term} onChange={setTerm} label="Search orders" placeholder="Number, name or phone" />
-          <select
-            aria-label="Date range"
-            value={range}
-            onChange={(e) => setRange(e.target.value as Range)}
-            className={cn(field, "sm:w-44")}
-          >
-            {RANGES.map(([k, label]) => (
-              <option key={k} value={k}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </div>
+        <SearchField value={term} onChange={setTerm} label="Search orders" placeholder="Number, name or phone" />
+        <DateBar value={range} custom={custom} onChange={setRange} onPick={() => setPicking(true)} label="Order date" />
         <FilterTabs items={tabs} value={tab} onChange={setTab} label="Order status" />
       </div>
+      <CustomRangeSheet
+        open={picking}
+        onClose={() => setPicking(false)}
+        initial={custom ?? thisMonth()}
+        onApply={(r) => {
+          setCustom(r);
+          setRange("custom");
+          setPicking(false);
+        }}
+      />
+      {rows.length > 0 && <DayStamps stamps={stamps} onJump={jump} allFolded={groups.length > 0 && groups.every((g) => folds.isFolded(g.key))} onFoldAll={() => folds.foldAll(groups.map((g) => g.key))} onUnfoldAll={folds.unfoldAll} />}
 
       {selectMode && rows.length > 0 && (
         <div className="mt-4 flex items-center justify-between gap-3 text-sm lg:hidden">
           <span className="text-muted-foreground">
-            {selected.size === 0 ? "Tap orders to select them" : `${selected.size} of ${rows.length} selected`}
+            {selected.size === 0 ? "Tap orders to select them" : `${selected.size} of ${shownRows.length} selected`}
           </span>
           <button type="button" onClick={toggleAll} className="min-h-11 px-2 text-foreground underline-offset-4 hover:underline">
             {allSelected ? "Clear selection" : "Select all shown"}
@@ -1229,6 +1247,7 @@ function Orders() {
                     onClick={() => {
                       setTerm("");
                       setRange("all");
+                      setCustom(null);
                     }}
                   >
                     Clear search and date
@@ -1255,13 +1274,23 @@ function Orders() {
         {rows.length > 0 && (
           <>
             <ul className="grid gap-3 md:grid-cols-2 lg:hidden" aria-label="Orders">
-              {rows.map((o) => (
-                <OrderCard key={o.id} o={o} h={handlers} selectMode={selectMode} selected={selected.has(o.id)} onToggle={() => toggleOne(o.id)} press={press} />
+              {groups.map((g) => (
+                <Fragment key={g.key}>
+                  <li role="presentation" className="col-span-full">
+                    <DayHeader id={`orders-day-m-${g.key}`} label={g.label} count={g.rows.length} noun="order" badge={toDispatch(g)} folded={folds.isFolded(g.key)} onToggle={() => folds.toggle(g.key)} />
+                  </li>
+                  {folds.isFolded(g.key)
+                    ? null
+                    : g.rows.map((o) => (
+                        <OrderCard key={o.id} o={o} h={handlers} selectMode={selectMode} selected={selected.has(o.id)} onToggle={() => toggleOne(o.id)} press={press} />
+                      ))}
+                </Fragment>
               ))}
             </ul>
             <div className="hidden lg:block">
               <OrderTable
-                rows={rows}
+                groups={groups}
+                folds={folds}
                 h={handlers}
                 selected={selected}
                 onToggle={toggleOne}
