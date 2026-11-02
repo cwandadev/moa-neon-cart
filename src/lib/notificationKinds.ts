@@ -12,6 +12,8 @@ const KNOWN: Record<string, { label: string; icon: string }> = {
   paid: { label: "Payments", icon: "bx-credit-card" },
   refund: { label: "Refunds", icon: "bx-undo" },
   refunds: { label: "Refunds", icon: "bx-undo" },
+  review: { label: "Reviews", icon: "bx-star" },
+  reviews: { label: "Reviews", icon: "bx-star" },
   stock: { label: "Stock", icon: "bx-package" },
   inventory: { label: "Stock", icon: "bx-package" },
   chat: { label: "Chats", icon: "bx-message-dots" },

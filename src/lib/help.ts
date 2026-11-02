@@ -103,7 +103,7 @@ export const CUSTOMER_GUIDE: Guide = {
         { id: "password", q: "How do I change my password?", a: [t("Open the account menu, choose Account and use Change password. It's all on your [account page](/account).")] },
         { id: "photo", q: "How do I add a profile photo?", a: [t("Open your [account page](/account) and tap Change photo. Pick a picture, move it so your face is in the square and save. If you signed in with Google your Google photo shows until you add your own.")] },
         { id: "wishlist", q: "What is the heart on a product?", a: [t("It saves the product to your wishlist, and you'll find it again in Account under Wishlist.")] },
-        { id: "alerts-list", q: "Where do I see my notifications?", a: [t("The bell shows what's new about your orders, and the full list is on your [notifications page](/notifications). Open one to jump straight to the order.")] },
+        { id: "alerts-list", q: "Where do I see my notifications?", a: [t("The bell shows what's new about your orders, and the full list is on your [notifications page](/notifications). Open one to jump straight to the order. An order with something new also shows a New badge in [My orders](/orders), and it goes away once you open that order. On a phone you can swipe a notification right to mark it read or left to remove it.")] },
       ],
     },
   ],
