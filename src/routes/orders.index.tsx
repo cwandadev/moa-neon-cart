@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/lib/auth";
 import { fetchProduct } from "@/lib/catalog";
+import { OrderUpdateBadge, OrderUpdatesStrip } from "@/components/orders/OrderUpdates";
 import { useNotifications } from "@/lib/notifications";
 import { canRemove, refundNote, STAGE, stageOf, type Stage } from "@/lib/orderStage";
 import { usePersistedState } from "@/lib/persist";
@@ -301,6 +302,7 @@ function OrderCard({ o, now, canHide, onRemove, onCancel, onBuyAgain, busy, sele
           <div className="min-w-0 flex-1">
             <p className="font-body text-sm font-medium text-primary">{o.code}</p>
             <p className="font-body text-xs text-muted-foreground">{dateText(o.created_at)}</p>
+            <OrderUpdateBadge code={o.code} className="mt-1.5" />
           </div>
           <span className={cn("shrink-0 rounded-full px-2.5 py-1 font-body text-[11px] font-medium", meta.pill)}>
             {meta.label}
@@ -457,6 +459,7 @@ function OrderTile({ o, now, canHide, onRemove, onCancel, onBuyAgain, busy, sele
             {dateText(o.created_at)} · {n} {n === 1 ? "item" : "items"}
             {note ? ` · ${note}` : ""}
           </p>
+          <OrderUpdateBadge code={o.code} className="mt-2 self-start" />
           <p className="mt-2 truncate font-body text-sm">
             {first?.name}
             {first?.variant_label ? ` (${first.variant_label})` : ""}
@@ -912,6 +915,7 @@ function MyOrders() {
               </p>
             )}
             {error && <p className="mb-4 font-body text-sm text-destructive">{error}</p>}
+            <OrderUpdatesStrip />
 
             {selecting && (
               <SelectionStrip

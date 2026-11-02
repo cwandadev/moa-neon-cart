@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { LocationPinButton } from "@/components/shop/LocationPinButton";
 import { PaymentPanel } from "@/components/shop/PaymentPanel";
+import { OrderWhatsNew } from "@/components/orders/OrderUpdates";
 import { Header } from "@/components/shop/Header";
 import {
   AlertDialog,
@@ -218,6 +219,8 @@ function OrderTracking() {
         <p className="mt-1 font-body text-sm text-muted-foreground">
           Placed {new Date(order.created_at).toLocaleString()}
         </p>
+
+        <OrderWhatsNew code={order.code} />
 
         <section className="mt-6 rounded-2xl border border-border bg-card/60 p-5">
           {cancelled ? (
