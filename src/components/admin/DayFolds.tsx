@@ -76,16 +76,19 @@ export function scrollToDay(id: string) {
 }
 
 /** Choose the days a list covers: a shortcut, or "Pick dates" for a day or a range on the calendar. */
-export function DateBar({ value, custom, onChange, onPick, label = "Date" }: { value: DayFilter; custom: Range | null; onChange: (v: Exclude<DayFilter, "custom">) => void; onPick: () => void; label?: string }) {
+export function DateBar({ value, custom, onChange, onPick, label = "Date", stacked = false }: { value: DayFilter; custom: Range | null; onChange: (v: Exclude<DayFilter, "custom">) => void; onPick: () => void; label?: string; stacked?: boolean }) {
+  // Side by side and scrolling sideways on a narrow screen, or one under another in a sidebar.
+  const chip = stacked ? "w-full justify-start rounded-xl px-3 min-h-10 text-sm" : "shrink-0 whitespace-nowrap rounded-full px-3.5 min-h-9 text-xs";
+  const off = stacked ? "border-transparent hover:bg-white/[0.06]" : "border-[#262626] hover:bg-white/[0.06]";
   return (
-    <div role="group" aria-label={label} className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none]">
+    <div role="group" aria-label={label} className={stacked ? "grid gap-1" : "-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none]"}>
       {DAY_FILTERS.map(([k, text]) => (
         <button
           key={k}
           type="button"
           aria-pressed={value === k}
           onClick={() => onChange(k)}
-          className={cn("min-h-9 shrink-0 whitespace-nowrap rounded-full border px-3.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", value === k ? "border-transparent bg-white font-medium text-black" : "border-[#262626] hover:bg-white/[0.06]")}
+          className={cn("inline-flex items-center border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", chip, value === k ? "border-transparent bg-white font-medium text-black" : off)}
         >
           {text}
         </button>
@@ -94,7 +97,7 @@ export function DateBar({ value, custom, onChange, onPick, label = "Date" }: { v
         type="button"
         aria-pressed={value === "custom"}
         onClick={onPick}
-        className={cn("inline-flex min-h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", value === "custom" ? "border-transparent bg-white font-medium text-black" : "border-[#262626] hover:bg-white/[0.06]")}
+        className={cn("inline-flex items-center gap-1.5 border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", chip, value === "custom" ? "border-transparent bg-white font-medium text-black" : off)}
       >
         <i aria-hidden className="bx bx-calendar text-base" />
         {value === "custom" ? filterText("custom", custom) : "Pick dates"}
