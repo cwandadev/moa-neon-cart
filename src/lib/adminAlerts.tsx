@@ -1,5 +1,6 @@
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { tabIsVisible } from "@/lib/popupRules";
 import { money } from "@/lib/products";
 import { popup } from "@/lib/swipeToasts";
 import { supabase } from "@/lib/supabase";
@@ -127,6 +128,11 @@ export function useAdminAlerts(enabled: boolean): AdminAlerts {
     let cancelled = false;
     let live = false;
     let timer: number | undefined;
+    // Who is signed in here, so the person who placed an order is not also told "New order" about their own order (they get the customer notice).
+    let me: string | null = null;
+    void supabase.auth.getSession().then(({ data }) => {
+      me = data.session?.user.id ?? null;
+    });
 
     const refresh = async () => {
       try {
@@ -148,7 +154,8 @@ export function useAdminAlerts(enabled: boolean): AdminAlerts {
       .channel("admin-alerts")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "orders" }, (payload) => {
         schedule();
-        if (!live || pathRef.current.startsWith("/admin/orders") || (payload.new as { stock_reserved?: boolean }).stock_reserved) return;
+        const mine = (payload.new as { user_id?: string }).user_id;
+        if (!live || !tabIsVisible() || pathRef.current.startsWith("/admin/orders") || (payload.new as { stock_reserved?: boolean }).stock_reserved || (me !== null && mine === me)) return;
         const o = payload.new as unknown as { code?: string; customer_name?: string; total?: number };
         popup(`New order ${o.code ?? ""}`.trim(), {
           id: `new-order-${o.code ?? Date.now()}`,
@@ -162,7 +169,7 @@ export function useAdminAlerts(enabled: boolean): AdminAlerts {
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, (payload) => {
         schedule();
         const m = payload.new as unknown as { sender_role?: string; body?: string };
-        if (!live || m.sender_role !== "client" || pathRef.current.startsWith("/admin/inbox")) return;
+        if (!live || !tabIsVisible() || m.sender_role !== "client" || pathRef.current.startsWith("/admin/inbox")) return;
         const body = m.body ?? "";
         popup("New customer message", {
           description: body.length > 80 ? `${body.slice(0, 77)}…` : body,
