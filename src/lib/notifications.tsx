@@ -1,5 +1,6 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { shouldPopup } from "@/lib/popupRules";
 import { popup, useToastSwipe } from "@/lib/swipeToasts";
 import { supabase } from "@/lib/supabase";
 
@@ -195,6 +196,8 @@ export function NotificationsHost() {
           setItems([n, ...state.items]);
           // The admin alert system already announces new orders live.
           if (n.kind === "order_new") return;
+          // Only the tab a person is looking at shows a popup, and not for news the open page already shows (the list above is updated either way).
+          if (!shouldPopup(n.link)) return;
           const t = SEV[n.severity] ?? SEV.info;
           const link = n.link;
           popup(n.title, {

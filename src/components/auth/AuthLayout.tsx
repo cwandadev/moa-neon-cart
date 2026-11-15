@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { useState, type ReactNode } from "react";
+import { GoogleSignIn } from "@/components/auth/GoogleSignIn";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
@@ -80,9 +81,13 @@ export function SocialButtons({ onSocial }: { onSocial: (p: "google" | "facebook
     <>
       {/* Facebook sign-in is not set up yet, so its button is not shown (a button that cannot work is worse than none). Put it back here when it is. */}
       <div className="grid grid-cols-1 gap-3">
-        <button type="button" className={btn} onClick={() => onSocial("google")}>
-          <i className="bx bxl-google text-lg" /> Continue with Google
-        </button>
+        <GoogleSignIn
+          fallback={
+            <button type="button" className={btn} onClick={() => onSocial("google")}>
+              <i className="bx bxl-google text-lg" /> Continue with Google
+            </button>
+          }
+        />
       </div>
       <div className="my-4 flex items-center gap-3 font-body text-xs text-muted-foreground">
         <span className="h-px flex-1 bg-border" />

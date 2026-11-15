@@ -5,6 +5,7 @@ import { Avatar } from "@/components/Avatar";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { useNotifications } from "@/lib/notifications";
+import { useOrderAlerts } from "@/lib/orderAlerts";
 import { clearPersisted } from "@/lib/persist";
 
 const item =
@@ -13,6 +14,7 @@ const item =
 export function UserMenu({ variant, className }: { variant: "header" | "nav"; className?: string }) {
   const { user, isStaff, logOut } = useAuth();
   const { unread } = useNotifications();
+  const { orders: orderUpdates } = useOrderAlerts(); // orders with something new (cancelled, on its way, delivered...)
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -88,6 +90,11 @@ export function UserMenu({ variant, className }: { variant: "header" | "nav"; cl
           )}
           <Link to="/orders" onClick={() => setOpen(false)} className={item}>
             <i className="bx bx-receipt text-lg" /> My orders
+            {orderUpdates > 0 && (
+              <span aria-label={`${orderUpdates} ${orderUpdates === 1 ? "order has" : "orders have"} new updates`} className="ml-auto rounded-full bg-destructive px-1.5 text-[10px] font-semibold text-white">
+                {orderUpdates > 9 ? "9+" : orderUpdates}
+              </span>
+            )}
           </Link>
           <Link to="/notifications" onClick={() => setOpen(false)} className={item}>
             <i className="bx bx-bell text-lg" /> Notifications

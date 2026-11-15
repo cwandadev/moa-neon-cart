@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { markMany, useNotifications, type Notif } from "@/lib/notifications";
+import { markMany, useNotifications, type Notif, type Severity } from "@/lib/notifications";
 
 /**
  * Order updates. Every notification about an order points at it (/orders/MOA-4801), so what is new about each order can be worked out from the
@@ -33,7 +33,16 @@ export const UPDATE_WORDS: Record<string, string> = {
 };
 export const updateWords = (n: Pick<Notif, "kind" | "title">): string => UPDATE_WORDS[n.kind] ?? n.title;
 
-export type OrderAlert = { code: string; items: Notif[]; unread: number; latest: Notif };
+/** How serious each kind of news is. Cancelled and failed are "critical", and they decide an order's colour. */
+export const SEVERITY_RANK: Record<Severity, number> = { info: 0, success: 1, warning: 2, critical: 3 };
+
+/** `latest` is the newest update; `top` is the most serious one (the newest of those), which is what the badge says and what colour it is. */
+export type OrderAlert = { code: string; items: Notif[]; unread: number; latest: Notif; top: Notif };
+
+const moreSerious = (a: Notif, b: Notif): boolean => {
+  const d = (SEVERITY_RANK[a.severity] ?? 0) - (SEVERITY_RANK[b.severity] ?? 0);
+  return d > 0 || (d === 0 && a.created_at > b.created_at);
+};
 
 /** The orders that have something new: one entry per order, from the unread notifications that point at it. */
 export function orderAlertsOf(items: readonly Notif[]): Map<string, OrderAlert> {
@@ -47,7 +56,8 @@ export function orderAlertsOf(items: readonly Notif[]): Map<string, OrderAlert> 
       a.items.push(n);
       a.unread += 1;
       if (n.created_at > a.latest.created_at) a.latest = n;
-    } else out.set(code, { code, items: [n], unread: 1, latest: n });
+      if (moreSerious(n, a.top)) a.top = n;
+    } else out.set(code, { code, items: [n], unread: 1, latest: n, top: n });
   }
   return out;
 }
