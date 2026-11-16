@@ -4,6 +4,7 @@ import { AuthLayout, Field, inputClass } from "@/components/auth/AuthLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { supabase } from "@/lib/supabase";
+import { captchaOptions } from "@/lib/turnstile";
 
 export const Route = createFileRoute("/forgot-password")({
   head: () => ({ meta: [{ title: "Forgot Password — MOA Mart" }] }),
@@ -22,6 +23,7 @@ function ForgotPassword() {
     setBusy(true);
     const { error: err } = await supabase.auth.resetPasswordForEmail(email.trim(), {
       redirectTo: typeof window === "undefined" ? "/" : `${window.location.origin}/reset-password`,
+      ...(await captchaOptions()),
     });
     setBusy(false);
     if (err) setError(err.message);

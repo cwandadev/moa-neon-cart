@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { supabase } from "./supabase";
+import { captchaOptions } from "./turnstile";
 
 export type Role = "customer" | "staff" | "admin" | "rider";
 
@@ -41,6 +42,12 @@ type AuthValue = {
   logOut: () => void;
   /** Returns a user id usable for RLS (anonymous sessions included), or null. */
   ensureSession: () => Promise<string | null>;
+  /** True while this browser holds a guest session (someone who ordered without an account). */
+  isGuest: boolean;
+  /** Adds an email to the guest session. The person confirms it with the link we send, then chooses a password. Their orders stay with them. */
+  saveWithEmail: (email: string, name?: string) => Promise<AuthResult>;
+  /** Adds Google to the guest session: the browser goes to Google and comes back signed in, with the same orders. */
+  saveWithGoogle: () => Promise<AuthResult>;
   /** Reloads the profile (name, role) after it changed. */
   refreshProfile: () => void;
 };
@@ -58,7 +65,17 @@ function friendlyAuthError(message: string): string {
   if (m.includes("password should be at least")) return "Password must be at least 8 characters.";
   if (m.includes("rate limit") || m.includes("too many"))
     return "Too many attempts. Please wait a moment and try again.";
+  if (m.includes("captcha")) return "The security check did not pass. Please try again.";
   return message;
+}
+
+/** The same, for adding Google or an email to a guest session. */
+function friendlyLinkError(message: string): string {
+  const m = message.toLowerCase();
+  if (m.includes("manual linking") || m.includes("linking is disabled")) return "Saving this way is not switched on yet. Please try the other way.";
+  if (m.includes("already") && (m.includes("registered") || m.includes("linked") || m.includes("exists")))
+    return "That already has an account here. Log in with it instead.";
+  return friendlyAuthError(message);
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -192,7 +209,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data, error } = await supabase.auth.signUp({
       email,
       password: d.password,
-      options: { data: { first_name: firstName, last_name: lastName } },
+      options: { data: { first_name: firstName, last_name: lastName }, ...(await captchaOptions()) },
     });
     if (error) return { ok: false, error: friendlyAuthError(error.message) };
     if (!data.session) {
@@ -205,6 +222,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { error } = await supabase.auth.signInWithPassword({
       email: normEmail(emailRaw),
       password,
+      options: await captchaOptions(),
     });
     if (error) return { ok: false, error: friendlyAuthError(error.message) };
     return { ok: true };
@@ -229,12 +247,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const { data } = await supabase.auth.getSession();
       if (data.session) return data.session.user.id;
-      const { data: res, error } = await supabase.auth.signInAnonymously();
+      const { data: res, error } = await supabase.auth.signInAnonymously({ options: await captchaOptions() });
       if (error) return null;
       return res.user?.id ?? null;
     } catch {
       return null;
     }
+  }, []);
+
+  const isGuest = Boolean(sessionUserId) && sessionAnon;
+
+  const saveWithEmail = useCallback<AuthValue["saveWithEmail"]>(async (emailRaw, name = "") => {
+    const email = normEmail(emailRaw);
+    if (!/^\S+@\S+\.\S+$/.test(email)) return { ok: false, error: "Please enter a valid email." };
+    const [first = "", ...rest] = name.trim().split(/\s+/);
+    const { error } = await supabase.auth.updateUser(
+      { email, ...(first ? { data: { first_name: first, last_name: rest.join(" ") } } : {}) },
+      { emailRedirectTo: `${window.location.origin}/reset-password` },
+    );
+    if (error) return { ok: false, error: friendlyLinkError(error.message) };
+    return { ok: true };
+  }, []);
+
+  const saveWithGoogle = useCallback<AuthValue["saveWithGoogle"]>(async () => {
+    const { error } = await supabase.auth.linkIdentity({
+      provider: "google",
+      options: { redirectTo: window.location.origin },
+    });
+    if (error) return { ok: false, error: friendlyLinkError(error.message) };
+    return { ok: true };
   }, []);
 
   const value = useMemo<AuthValue>(
@@ -248,9 +289,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       socialLogin,
       logOut,
       ensureSession,
+      isGuest,
+      saveWithEmail,
+      saveWithGoogle,
       refreshProfile: () => setProfileTick((n) => n + 1),
     }),
-    [profile, ready, signUp, logIn, socialLogin, logOut, ensureSession],
+    [profile, ready, signUp, logIn, socialLogin, logOut, ensureSession, isGuest, saveWithEmail, saveWithGoogle],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
