@@ -9,6 +9,7 @@ import { CustomRangeSheet } from "@/components/admin/CustomRangeSheet";
 import { DateBar, DayHeader, DayStamps, scrollToDay, useFolds } from "@/components/admin/DayFolds";
 import { DeliveryPanel } from "@/components/admin/DeliveryPanel";
 import { EmptyState, PageHead, Skeleton } from "@/components/moa/ui";
+import { GuestTag } from "@/components/orders/GuestTag";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   DAY_MS,
@@ -54,6 +55,8 @@ type Row = {
   created_at: string;
   paid_at: string | null;
   customer_name: string;
+  /** Placed without an account (needs database step 000027). */
+  is_guest?: boolean | null;
   phone: string;
   location: string;
   preferred_time: string | null;
@@ -80,7 +83,7 @@ type Counts = Record<Tab, number>;
 
 const PAGE = 25;
 const SELECT =
-  "id, code, created_at, paid_at, customer_name, phone, location, preferred_time, notes, total, payment_status, fulfilment_status, refund_status, cancel_reason, lat, lng, warehouse_id, stock_ready, order_items(name, variant_label, image, qty, price), deliveries(status, failed_reason, proof_flag, verified_by, rider:profiles!deliveries_rider_id_fkey(first_name, last_name))";
+  "id, code, created_at, paid_at, customer_name, is_guest, phone, location, preferred_time, notes, total, payment_status, fulfilment_status, refund_status, cancel_reason, lat, lng, warehouse_id, stock_ready, order_items(name, variant_label, image, qty, price), deliveries(status, failed_reason, proof_flag, verified_by, rider:profiles!deliveries_rider_id_fkey(first_name, last_name))";
 
 
 const REASONS = [
@@ -635,7 +638,10 @@ function OrderCard({
               )}
             </div>
           </div>
-          <p className="mt-3 truncate text-base">{o.customer_name}</p>
+          <p className="mt-3 truncate text-base">
+            {o.customer_name}
+            <GuestTag show={o.is_guest} />
+          </p>
           <p className="truncate text-sm text-muted-foreground">{o.location}</p>
           <DeliveryLine o={o} />
           <div className="mt-3 flex items-center gap-3">
@@ -741,7 +747,10 @@ function OrderTable({
                   <p className={cn("text-xs", when.urgent ? "text-destructive" : "text-muted-foreground")}>{when.text}</p>
                 </td>
                 <td className="px-3 py-3">
-                  <p className="truncate">{o.customer_name}</p>
+                  <p className="truncate">
+                    {o.customer_name}
+                    <GuestTag show={o.is_guest} />
+                  </p>
                   <p className="truncate text-xs text-muted-foreground">{o.location}</p>
                   <DeliveryLine o={o} compact />
                 </td>
@@ -833,7 +842,10 @@ function OrderDetails({ o, shown, onShow }: { o: Row; shown: boolean; onShow: ()
       <section>
         <h3 className="mb-3 font-display text-base font-semibold">Customer</h3>
         <dl className="grid gap-3">
-          <Detail label="Name">{o.customer_name}</Detail>
+          <Detail label="Name">
+            {o.customer_name}
+            <GuestTag show={o.is_guest} />
+          </Detail>
           <Detail label="Phone">
             <span className="flex flex-wrap items-center gap-3">
               <span>{shown ? o.phone : maskPhone(o.phone)}</span>

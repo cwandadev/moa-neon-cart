@@ -1,6 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { supabase } from "@/lib/supabase";
+import { captchaOptions } from "@/lib/turnstile";
 
 /**
  * Sign in with Google's own button.
@@ -88,7 +89,9 @@ export function GoogleSignIn({ fallback }: { fallback: ReactNode }) {
           cancel_on_tap_outside: true,
           callback: ({ credential }) => {
             setError("");
-            void supabase.auth.signInWithIdToken({ provider: "google", token: credential, nonce: nonce.raw }).then(({ error: e }) => {
+            void captchaOptions()
+              .then((options) => supabase.auth.signInWithIdToken({ provider: "google", token: credential, nonce: nonce.raw, options }))
+              .then(({ error: e }) => {
               if (e) {
                 console.error("Google sign-in failed:", e.message);
                 setError("Google sign-in did not work. Please try again, or use your email.");

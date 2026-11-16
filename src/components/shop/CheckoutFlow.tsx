@@ -2,6 +2,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { LocationPinButton } from "@/components/shop/LocationPinButton";
 import { PaymentPanel } from "@/components/shop/PaymentPanel";
+import { SaveOrders } from "@/components/shop/SaveOrders";
 import { SwipeZone } from "@/components/shop/SwipeZone";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -284,6 +285,8 @@ export function CheckoutFlow({
                 to pay it as soon as payments open.
               </p>
             )}
+            {/* A guest is offered to keep their orders once the order is done (or the payment ended), not while they are paying. */}
+            {(done || ended) && <SaveOrders defaultName={form.name} />}
           </div>
         ) : (
           <div className="grid gap-5">
